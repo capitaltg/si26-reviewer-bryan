@@ -2,7 +2,13 @@
 name = "worker"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["psycopg[binary]>=3.2", "httpx>=0.27"]
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "httpx>=0.27",
+    "pymupdf>=1.24",
+    "anthropic>=0.40",
+    "pydantic>=2",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

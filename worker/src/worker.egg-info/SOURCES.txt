@@ -1,7 +1,13 @@
 pyproject.toml
 src/worker/__init__.py
+src/worker/db.py
+src/worker/jobs.py
+src/worker/main.py
+src/worker/pipeline.py
 src/worker.egg-info/PKG-INFO
 src/worker.egg-info/SOURCES.txt
 src/worker.egg-info/dependency_links.txt
 src/worker.egg-info/requires.txt
 src/worker.egg-info/top_level.txt
+tests/test_jobs.py
+tests/test_main.py

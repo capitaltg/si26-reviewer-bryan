@@ -61,7 +61,10 @@ export const documents = pgTable("documents", {
   kind: documentKindEnum("kind").notNull(),
   displayName: text("display_name").notNull(),
   blobPathname: text("blob_pathname").notNull(),
+  blobUrl: text("blob_url").notNull(),
+  contentType: text("content_type").notNull(),
   pdfBlobPathname: text("pdf_blob_pathname"),
+  pdfBlobUrl: text("pdf_blob_url"),
   pageCount: integer("page_count"),
 });
 
@@ -71,6 +74,7 @@ export const uploads = pgTable("uploads", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   blobPathname: text("blob_pathname").notNull().unique(),
+  blobUrl: text("blob_url").notNull(),
   displayName: text("display_name").notNull(),
   contentType: text("content_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),

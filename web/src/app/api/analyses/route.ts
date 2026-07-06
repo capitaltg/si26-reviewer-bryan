@@ -12,22 +12,26 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function countOwnedUploads(userId: string, pathnames: string[]) {
-  const rows = await db
-    .select({ blobPathname: uploads.blobPathname })
+async function listOwnedUploads(userId: string, pathnames: string[]) {
+  return db
+    .select({
+      blobPathname: uploads.blobPathname,
+      blobUrl: uploads.blobUrl,
+      contentType: uploads.contentType,
+    })
     .from(uploads)
     .where(and(eq(uploads.userId, userId), inArray(uploads.blobPathname, pathnames)));
-  return rows.length;
 }
 
 async function waitForOwnedUploads(userId: string, pathnames: string[]) {
   for (let attempt = 0; attempt < UPLOAD_COMPLETION_WAIT_ATTEMPTS; attempt += 1) {
-    if ((await countOwnedUploads(userId, pathnames)) === pathnames.length) {
-      return true;
+    const rows = await listOwnedUploads(userId, pathnames);
+    if (rows.length === pathnames.length) {
+      return rows;
     }
     await sleep(UPLOAD_COMPLETION_WAIT_MS);
   }
-  return false;
+  return null;
 }
 
 export async function POST(request: Request) {
@@ -44,12 +48,16 @@ export async function POST(request: Request) {
   }
   const input = parsed.data;
   const pathnames = input.documents.map((document) => document.blobPathname);
-  if (!(await waitForOwnedUploads(userId, pathnames))) {
+  const ownedUploads = await waitForOwnedUploads(userId, pathnames);
+  if (!ownedUploads) {
     return NextResponse.json(
       { error: "one or more uploads are missing or not owned by current user" },
       { status: 400 },
     );
   }
+  const uploadByPathname = new Map(
+    ownedUploads.map((upload) => [upload.blobPathname, upload]),
+  );
   const id = await db.transaction(async (tx) => {
     const [analysis] = await tx
       .insert(analyses)
@@ -61,12 +69,19 @@ export async function POST(request: Request) {
       })
       .returning({ id: analyses.id });
     await tx.insert(documents).values(
-      input.documents.map((d) => ({
-        analysisId: analysis.id,
-        kind: d.kind,
-        displayName: d.displayName,
-        blobPathname: d.blobPathname,
-      })),
+      input.documents.map((d) => {
+        // Never trust a client-supplied URL/content type: always copy from
+        // the server-verified uploads row keyed by blobPathname.
+        const upload = uploadByPathname.get(d.blobPathname)!;
+        return {
+          analysisId: analysis.id,
+          kind: d.kind,
+          displayName: d.displayName,
+          blobPathname: d.blobPathname,
+          blobUrl: upload.blobUrl,
+          contentType: upload.contentType,
+        };
+      }),
     );
     return analysis.id;
   });

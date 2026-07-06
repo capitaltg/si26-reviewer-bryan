@@ -53,6 +53,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           .values({
             userId: parsed.userId,
             blobPathname: blob.pathname,
+            blobUrl: blob.url,
             displayName: blob.pathname.split("/").at(-1) ?? blob.pathname,
             contentType,
             sizeBytes,

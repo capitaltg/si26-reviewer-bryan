@@ -15,6 +15,13 @@
       "when": 1783369510343,
       "tag": "0001_orange_newton_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783380603062,
+      "tag": "0002_shocking_justin_hammer",
+      "breakpoints": true
     }
   ]
 }

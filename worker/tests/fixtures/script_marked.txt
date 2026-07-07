@@ -1,0 +1,12 @@
+Slide 1:
+Welcome everyone to the Q3 pipeline review. Today we'll walk through revenue
+trends, the new hires this quarter, and what we're targeting for Q4.
+
+Slide 2:
+This chart shows the regional breakdown. The Northeast is outperforming
+forecast by twelve percent, while the West Coast is tracking flat quarter
+over quarter.
+
+Slide 3:
+Let's close with the roadmap. We're prioritizing the mobile release in
+October and the reporting dashboard refresh in November.

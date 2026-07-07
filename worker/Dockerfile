@@ -13,6 +13,6 @@ RUN cd blob_helper && npm install --omit=dev
 
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -e .
 
 CMD ["python", "-m", "worker.main"]

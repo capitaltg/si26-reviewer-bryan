@@ -38,6 +38,11 @@ def test_download_sends_bearer_token_and_returns_bytes(monkeypatch):
     assert headers == {"Authorization": "Bearer test-token"}
 
 
+def test_helper_dir_points_to_a_real_directory_containing_put_mjs():
+    assert blob.HELPER_DIR.is_dir()
+    assert (blob.HELPER_DIR / "put.mjs").is_file()
+
+
 def test_upload_invokes_node_helper_and_parses_result(monkeypatch):
     calls = {}
 

@@ -231,6 +231,91 @@ def test_reading_order_preserves_multi_column_card_adjacency(conn, monkeypatch):
     assert "Data & Governance" not in between
 
 
+def test_ingest_document_is_idempotent_on_retry(conn, monkeypatch):
+    """Simulates jobs.requeue_stuck resetting a stuck analysis back to
+    'queued' and the job being retried from scratch: ingest_document must
+    not crash on pages_document_id_page_no_unique when re-run for the same
+    document."""
+    analysis_id = insert_analysis(conn)
+    document_id = _insert_document(
+        conn, analysis_id, blob_url="https://blob.example/ctg_deck.pdf"
+    )
+    fixture_bytes = (FIXTURES / "ctg_deck.pdf").read_bytes()
+    _FakeBlobStore(monkeypatch, {"https://blob.example/ctg_deck.pdf": fixture_bytes})
+
+    document = _load_document(conn, document_id)
+    ingest.ingest_document(conn, analysis_id, document)
+    # Retry: must not raise on the pages unique constraint.
+    ingest.ingest_document(conn, analysis_id, document)
+
+    expected_pages = fitz.open(stream=fixture_bytes, filetype="pdf").page_count
+    count = conn.execute(
+        "SELECT count(*) FROM pages WHERE document_id = %s", (document_id,)
+    ).fetchone()[0]
+    assert count == expected_pages
+
+    doc_row = conn.execute(
+        "SELECT page_count FROM documents WHERE id = %s", (document_id,)
+    ).fetchone()
+    assert doc_row[0] == expected_pages
+
+
+def test_ingest_analysis_ingests_non_script_documents_and_skips_script(
+    conn, monkeypatch
+):
+    analysis_id = insert_analysis(conn)
+    non_script_id = _insert_document(
+        conn, analysis_id, blob_url="https://blob.example/ctg_deck.pdf"
+    )
+    script_id = _insert_document(
+        conn,
+        analysis_id,
+        kind="script",
+        content_type="application/pdf",
+        blob_pathname="orig/script.pdf",
+        blob_url="https://blob.example/script.pdf",
+        display_name="script.pdf",
+    )
+    fixture_bytes = (FIXTURES / "ctg_deck.pdf").read_bytes()
+    # Deliberately do NOT seed https://blob.example/script.pdf: if
+    # ingest_analysis ever tried to download it, the test would fail with a
+    # KeyError instead of silently succeeding, proving the script document
+    # was never touched.
+    store = _FakeBlobStore(
+        monkeypatch, {"https://blob.example/ctg_deck.pdf": fixture_bytes}
+    )
+
+    ingest.ingest_analysis(conn, analysis_id)
+
+    expected_pages = fitz.open(stream=fixture_bytes, filetype="pdf").page_count
+
+    non_script_pages = _pages(conn, non_script_id)
+    assert len(non_script_pages) == expected_pages
+
+    non_script_doc = conn.execute(
+        "SELECT pdf_blob_pathname, pdf_blob_url, page_count FROM documents WHERE id = %s",
+        (non_script_id,),
+    ).fetchone()
+    assert non_script_doc == (
+        "orig/doc.pdf",
+        "https://blob.example/ctg_deck.pdf",
+        expected_pages,
+    )
+
+    script_pages = _pages(conn, script_id)
+    assert script_pages == []
+
+    script_doc = conn.execute(
+        "SELECT pdf_blob_pathname, pdf_blob_url, page_count FROM documents WHERE id = %s",
+        (script_id,),
+    ).fetchone()
+    assert script_doc == (None, None, None)
+
+    assert not any(
+        "script" in u["pathname"] for u in store.uploads
+    ), "script document should never reach blob.upload"
+
+
 def test_check_png_size_raises_naming_offending_page(monkeypatch):
     monkeypatch.setattr(ingest, "MAX_PAGE_PNG_BYTES", 10)
     with pytest.raises(RuntimeError) as exc:

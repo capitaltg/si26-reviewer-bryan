@@ -93,9 +93,24 @@ def ingest_document(
     Raises:
         RuntimeError: if the PPTX->PDF conversion subprocess exits non-zero,
             or if a rendered page PNG exceeds MAX_PAGE_PNG_BYTES.
+
+    Idempotent: safe to call again for the same document (e.g. after a
+    worker crash + jobs.requeue_stuck requeues the analysis) — any `pages`
+    rows from a prior attempt are deleted before this run's rows are
+    inserted.
     """
     original_bytes = blob.download(document.blob_url)
     is_pptx = document.content_type == PPTX_CONTENT_TYPE
+
+    # Clear any pages from a prior partial run before re-inserting: the
+    # worker's own crash-recovery (jobs.requeue_stuck) can reset a stuck
+    # `running` analysis back to `queued`, which re-runs this function from
+    # scratch on retry. A plain INSERT would collide with
+    # pages_document_id_page_no_unique on the pages a previous attempt
+    # already wrote. Delete-then-reinsert (rather than an upsert) also
+    # correctly drops stale rows if a retry ever produces a different page
+    # count than a prior partial run.
+    conn.execute("DELETE FROM pages WHERE document_id = %s", (document.id,))
 
     with tempfile.TemporaryDirectory() as tmpdir:
         original_path = os.path.join(

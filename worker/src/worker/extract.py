@@ -118,7 +118,7 @@ def _load_solicitation_pages(conn: psycopg.Connection, analysis_id: str) -> list
         SELECT documents.id, documents.kind, documents.display_name,
                pages.page_no, pages.text
         FROM documents
-        JOIN pages ON pages.document_id = documents.id
+        LEFT JOIN pages ON pages.document_id = documents.id
         WHERE documents.analysis_id = %s
           AND documents.kind IN (%s, %s, %s, %s)
         ORDER BY documents.id, pages.page_no
@@ -129,6 +129,10 @@ def _load_solicitation_pages(conn: psycopg.Connection, analysis_id: str) -> list
     documents: list[dict] = []
     by_id: dict[str, dict] = {}
     for document_id, kind, display_name, page_no, text in rows:
+        if page_no is None:
+            raise ExtractionError(
+                f"solicitation document {display_name!r} has no pages"
+            )
         document_key = str(document_id)
         document = by_id.get(document_key)
         if document is None:
@@ -171,6 +175,7 @@ def _validate_result(
     result: ExtractionResult, documents: list[dict]
 ) -> dict[str, str | None]:
     keys = [requirement.key for requirement in result.requirements]
+    keys_set = set(keys)
     if len(keys) != len(set(keys)):
         raise ExtractionError("extraction returned duplicate requirement keys")
 
@@ -192,17 +197,38 @@ def _validate_result(
             )
         if (
             requirement.supersedes_key is not None
-            and requirement.supersedes_key not in set(keys)
+            and requirement.supersedes_key not in keys_set
         ):
             raise ExtractionError(
                 f"requirement {requirement.key!r} supersedes unknown key "
                 f"{requirement.supersedes_key!r}"
             )
+        if requirement.supersedes_key == requirement.key:
+            raise ExtractionError(
+                f"requirement {requirement.key!r} cannot supersede itself"
+            )
 
-    return {
+    supersedes_by_key = {
         requirement.key: requirement.supersedes_key
         for requirement in result.requirements
     }
+    links = {
+        key: supersedes_key
+        for key, supersedes_key in supersedes_by_key.items()
+        if supersedes_key is not None
+    }
+    for start_key in links:
+        visited: set[str] = set()
+        current_key = start_key
+        while current_key in links:
+            if current_key in visited:
+                raise ExtractionError(
+                    f"supersession cycle detected involving {current_key!r}"
+                )
+            visited.add(current_key)
+            current_key = links[current_key]
+
+    return supersedes_by_key
 
 
 def _read_tool_result(response) -> ExtractionResult:

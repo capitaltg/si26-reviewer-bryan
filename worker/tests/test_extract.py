@@ -13,6 +13,7 @@ QA_DOCUMENT_ID = "00000000-0000-0000-0000-000000000004"
 ATTACHMENT_DOCUMENT_ID = "00000000-0000-0000-0000-000000000005"
 DECK_DOCUMENT_ID = "00000000-0000-0000-0000-000000000003"
 SCRIPT_DOCUMENT_ID = "00000000-0000-0000-0000-000000000006"
+EMPTY_SOLICITATION_DOCUMENT_ID = "00000000-0000-0000-0000-000000000007"
 
 
 class _FakeToolUseBlock:
@@ -317,6 +318,50 @@ def test_run_extraction_allows_omitted_optional_fields(conn, monkeypatch):
     ]["items"]["required"]
     assert "weight" not in required
     assert "supersedes_key" not in required
+
+
+def test_run_extraction_rejects_supersession_self_reference(conn, monkeypatch):
+    analysis_id, _, _ = _package(conn)
+    input_value = copy.deepcopy(_valid_input())
+    input_value["requirements"][0]["supersedes_key"] = "l-1"
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", input_value)])
+
+    with pytest.raises(extract.ExtractionError, match="self"):
+        extract.run_extraction(conn, analysis_id)
+
+    assert _requirement_rows(conn, analysis_id) == []
+
+
+def test_run_extraction_rejects_supersession_cycle(conn, monkeypatch):
+    analysis_id, _, _ = _package(conn)
+    input_value = copy.deepcopy(_valid_input())
+    input_value["requirements"][0]["supersedes_key"] = "l-1-amended"
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", input_value)])
+
+    with pytest.raises(extract.ExtractionError, match="cycle"):
+        extract.run_extraction(conn, analysis_id)
+
+    assert _requirement_rows(conn, analysis_id) == []
+
+
+def test_run_extraction_rejects_page_less_solicitation_before_model_call(
+    conn, monkeypatch
+):
+    analysis_id, _, _ = _package(conn)
+    _insert_document(
+        conn,
+        analysis_id,
+        document_id=EMPTY_SOLICITATION_DOCUMENT_ID,
+        kind="solicitation_attachment",
+        display_name="empty-attachment.pdf",
+    )
+    messages = _fake_client(monkeypatch, [_FakeMessage("tool_use", _valid_input())])
+
+    with pytest.raises(extract.ExtractionError, match="no pages"):
+        extract.run_extraction(conn, analysis_id)
+
+    assert messages.calls == []
+    assert _requirement_rows(conn, analysis_id) == []
 
 
 def test_run_extraction_replaces_previous_rows(conn, monkeypatch):

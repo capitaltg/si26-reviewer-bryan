@@ -746,19 +746,19 @@
       "checkConstraints": {
         "findings_gap_no_proposal": {
           "name": "findings_gap_no_proposal",
-          "value": "(\"finding_kind\" <> 'gap') OR (\"proposal_verified\" IS NULL AND \"evidence_provenance\" IS NULL)"
+          "value": "(\"findings\".\"finding_kind\" <> 'gap') OR (\"findings\".\"proposal_verified\" IS NULL AND \"findings\".\"evidence_provenance\" IS NULL)"
         },
         "findings_observation_has_proposal": {
           "name": "findings_observation_has_proposal",
-          "value": "(\"finding_kind\" <> 'observation') OR (\"proposal_verified\" IS NOT NULL)"
+          "value": "(\"findings\".\"finding_kind\" <> 'observation') OR (\"findings\".\"proposal_verified\" IS NOT NULL)"
         },
         "findings_provenance_iff_proposal": {
           "name": "findings_provenance_iff_proposal",
-          "value": "(\"evidence_provenance\" IS NOT NULL) = (\"proposal_verified\" IS TRUE)"
+          "value": "(\"findings\".\"evidence_provenance\" IS NOT NULL) = (\"findings\".\"proposal_verified\" IS TRUE)"
         },
         "findings_verified_requires_sides": {
           "name": "findings_verified_requires_sides",
-          "value": "(\"verification\" <> 'verified') OR (\"solicitation_verified\" AND (\"finding_kind\" = 'gap' OR \"proposal_verified\"))"
+          "value": "(\"findings\".\"verification\" <> 'verified') OR (\"findings\".\"solicitation_verified\" AND (\"findings\".\"finding_kind\" = 'gap' OR \"findings\".\"proposal_verified\"))"
         }
       },
       "isRLSEnabled": false

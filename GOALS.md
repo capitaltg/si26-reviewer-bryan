@@ -37,6 +37,8 @@ Each reviewer is grounded in **distinct data**, not just a distinct persona prom
 
 Every finding is structured output (enforced by schema, not prompt asks): severity, confidence, two-sided evidence citation, suggested improvement. An orchestrator dedupes (semantic clustering, not string matching), prioritizes by Section M weighting, and produces an executive summary. Findings retain their reviewer of origin so the user knows which lens each suggestion comes from. Cross-reviewer disagreement is surfaced as a signal, not silently resolved.
 
+
+
 ## Ingestion pipeline
 
 1. **PPT → PDF at ingestion** (native "Save As PDF" path that preserves the text layer — verify on a real export; a rasterized export forces OCR everywhere). One slide = one page = one citation anchor, unified with the written volumes' pipeline.

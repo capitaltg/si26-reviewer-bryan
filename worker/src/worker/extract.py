@@ -95,8 +95,6 @@ EXTRACTION_TOOL = {
                         "ref",
                         "text",
                         "page_no",
-                        "weight",
-                        "supersedes_key",
                     ],
                     "additionalProperties": False,
                 },

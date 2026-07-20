@@ -291,6 +291,34 @@ def test_run_extraction_resolves_document_handles_and_supersession(conn, monkeyp
     assert "Narration text" not in prompt
 
 
+def test_run_extraction_allows_omitted_optional_fields(conn, monkeypatch):
+    analysis_id, _, _ = _package(conn)
+    input_value = {
+        "requirements": [
+            {
+                "key": "l-optional-defaults",
+                "source_document": 1,
+                "source": "L",
+                "ref": "L.2",
+                "text": "Provide the optional-field test response.",
+                "page_no": 1,
+            }
+        ]
+    }
+    messages = _fake_client(monkeypatch, [_FakeMessage("tool_use", input_value)])
+
+    extract.run_extraction(conn, analysis_id)
+
+    row = _requirement_rows(conn, analysis_id)[0]
+    assert row[6] is None
+    assert row[7] is None
+    required = messages.calls[0]["tools"][0]["input_schema"]["properties"][
+        "requirements"
+    ]["items"]["required"]
+    assert "weight" not in required
+    assert "supersedes_key" not in required
+
+
 def test_run_extraction_replaces_previous_rows(conn, monkeypatch):
     analysis_id, _, _ = _package(conn)
     messages = _fake_client(monkeypatch, [_FakeMessage("tool_use", _valid_input())])

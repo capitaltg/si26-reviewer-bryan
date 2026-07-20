@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   AnyPgColumn,
   boolean,
+  check,
   integer,
   jsonb,
   pgEnum,
@@ -151,3 +153,73 @@ export const mappings = pgTable("mappings", {
   slideRefs: jsonb("slide_refs").notNull(),
   rationale: text("rationale").notNull(),
 });
+
+export const findingReviewerEnum = pgEnum("finding_reviewer", [
+  "compliance",
+  "technical",
+  "evaluator",
+]);
+export const findingKindEnum = pgEnum("finding_kind", ["gap", "observation"]);
+export const findingSeverityEnum = pgEnum("finding_severity", [
+  "high",
+  "medium",
+  "low",
+]);
+export const findingConfidenceEnum = pgEnum("finding_confidence", [
+  "high",
+  "medium",
+  "low",
+]);
+export const evidenceProvenanceEnum = pgEnum("evidence_provenance", [
+  "native_text",
+  "script",
+  "vision_summary",
+]);
+export const findingVerificationEnum = pgEnum("finding_verification", [
+  "verified",
+  "unverified",
+  "dropped",
+]);
+
+export const findings = pgTable(
+  "findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    analysisId: uuid("analysis_id")
+      .notNull()
+      .references(() => analyses.id, { onDelete: "cascade" }),
+    reviewer: findingReviewerEnum("reviewer").notNull(),
+    findingKind: findingKindEnum("finding_kind").notNull(),
+    severity: findingSeverityEnum("severity").notNull(),
+    confidence: findingConfidenceEnum("confidence").notNull(),
+    requirementId: uuid("requirement_id").references(() => requirements.id, {
+      onDelete: "set null",
+    }),
+    evidence: jsonb("evidence").notNull(),
+    evidenceProvenance: evidenceProvenanceEnum("evidence_provenance"),
+    description: text("description").notNull(),
+    suggestion: text("suggestion").notNull(),
+    clusterId: uuid("cluster_id"),
+    solicitationVerified: boolean("solicitation_verified").notNull(),
+    proposalVerified: boolean("proposal_verified"),
+    verification: findingVerificationEnum("verification").notNull(),
+  },
+  (table) => [
+    check(
+      "findings_gap_no_proposal",
+      sql`(${table.findingKind} <> 'gap') OR (${table.proposalVerified} IS NULL AND ${table.evidenceProvenance} IS NULL)`,
+    ),
+    check(
+      "findings_observation_has_proposal",
+      sql`(${table.findingKind} <> 'observation') OR (${table.proposalVerified} IS NOT NULL)`,
+    ),
+    check(
+      "findings_provenance_iff_proposal",
+      sql`(${table.evidenceProvenance} IS NOT NULL) = (${table.proposalVerified} IS TRUE)`,
+    ),
+    check(
+      "findings_verified_requires_sides",
+      sql`(${table.verification} <> 'verified') OR (${table.solicitationVerified} AND (${table.findingKind} = 'gap' OR ${table.proposalVerified}))`,
+    ),
+  ],
+);

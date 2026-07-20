@@ -1,0 +1,124 @@
+{
+  "id": "6f7d1f08-9a7d-4fd7-b1b4-46bc2c7b1c04",
+  "prevId": "323870a5-7d54-4959-b61c-7f61b3ce2c9a",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": [
+    "public.analyses",
+    "public.documents",
+    "public.findings",
+    "public.mappings",
+    "public.pages",
+    "public.requirements",
+    "public.uploads",
+    "public.users"
+  ],
+  "enums": {
+    "public.analysis_status": {
+      "name": "analysis_status",
+      "schema": "public",
+      "values": [
+        "queued",
+        "running",
+        "complete",
+        "failed"
+      ]
+    },
+    "public.document_kind": {
+      "name": "document_kind",
+      "schema": "public",
+      "values": [
+        "solicitation_base",
+        "solicitation_amendment",
+        "solicitation_q_and_a",
+        "solicitation_attachment",
+        "deck",
+        "script"
+      ]
+    },
+    "public.mapping_status": {
+      "name": "mapping_status",
+      "schema": "public",
+      "values": [
+        "covered",
+        "partial",
+        "missing"
+      ]
+    },
+    "public.requirement_source": {
+      "name": "requirement_source",
+      "schema": "public",
+      "values": [
+        "L",
+        "M",
+        "SOW",
+        "limit",
+        "FAR",
+        "amendment"
+      ]
+    },
+    "public.finding_reviewer": {
+      "name": "finding_reviewer",
+      "schema": "public",
+      "values": [
+        "compliance",
+        "technical",
+        "evaluator"
+      ]
+    },
+    "public.finding_kind": {
+      "name": "finding_kind",
+      "schema": "public",
+      "values": [
+        "gap",
+        "observation"
+      ]
+    },
+    "public.finding_severity": {
+      "name": "finding_severity",
+      "schema": "public",
+      "values": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "public.finding_confidence": {
+      "name": "finding_confidence",
+      "schema": "public",
+      "values": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "public.evidence_provenance": {
+      "name": "evidence_provenance",
+      "schema": "public",
+      "values": [
+        "native_text",
+        "script",
+        "vision_summary"
+      ]
+    },
+    "public.finding_verification": {
+      "name": "finding_verification",
+      "schema": "public",
+      "values": [
+        "verified",
+        "unverified",
+        "dropped"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

@@ -288,7 +288,14 @@ def _load_matrix(
         return conn.execute(
             """
             SELECT r.ref, r.source, m.status, m.slide_refs, m.rationale
-            FROM mappings m JOIN requirements r ON r.id = m.requirement_id
+            FROM mappings m
+            JOIN requirements r ON r.id = m.requirement_id
+            JOIN documents d
+              ON d.id = r.source_document_id
+             AND d.analysis_id = r.analysis_id
+             AND d.analysis_id = %s
+            JOIN pages p
+              ON p.document_id = d.id AND p.page_no = r.page_no
             WHERE r.analysis_id = %s
               AND NOT EXISTS (
                   SELECT 1 FROM requirements s
@@ -297,12 +304,19 @@ def _load_matrix(
               )
             ORDER BY r.ref
             """,
-            (analysis_id,),
+            (analysis_id, analysis_id),
         ).fetchall()
     return conn.execute(
         """
         SELECT r.ref, r.source, m.status, m.slide_refs, m.rationale
-        FROM mappings m JOIN requirements r ON r.id = m.requirement_id
+        FROM mappings m
+        JOIN requirements r ON r.id = m.requirement_id
+        JOIN documents d
+          ON d.id = r.source_document_id
+         AND d.analysis_id = r.analysis_id
+         AND d.analysis_id = %s
+        JOIN pages p
+          ON p.document_id = d.id AND p.page_no = r.page_no
         WHERE r.analysis_id = %s
           AND r.source = ANY(%s::requirement_source[])
           AND NOT EXISTS (
@@ -312,7 +326,7 @@ def _load_matrix(
           )
         ORDER BY r.ref
         """,
-        (analysis_id, list(spec.matrix_sources)),
+        (analysis_id, analysis_id, list(spec.matrix_sources)),
     ).fetchall()
 
 

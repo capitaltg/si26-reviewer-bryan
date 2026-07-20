@@ -156,21 +156,23 @@ def test_loaders_ignore_cross_analysis_requirements_and_supersession(conn):
         """,
         (other_analysis_id, OTHER_BASE_DOC, l_id),
     )
-    conn.execute(
+    foreign_id = str(conn.execute(
         """
         INSERT INTO requirements
             (analysis_id, source_document_id, source, ref, text, page_no)
         VALUES (%s, %s, 'L', 'FOREIGN.1', 'Foreign document requirement.', 1)
+        RETURNING id
         """,
         (analysis_id, OTHER_BASE_DOC),
-    )
-    conn.execute(
-        """
-        INSERT INTO mappings (requirement_id, status, slide_refs, rationale)
-        VALUES (%s, 'covered', '[1]'::jsonb, 'Covered on slide 1.')
-        """,
-        (l_id,),
-    )
+    ).fetchone()[0])
+    for requirement_id in (l_id, foreign_id):
+        conn.execute(
+            """
+            INSERT INTO mappings (requirement_id, status, slide_refs, rationale)
+            VALUES (%s, 'covered', '[1]'::jsonb, 'Covered on slide 1.')
+            """,
+            (requirement_id,),
+        )
 
     primary = reviewers._load_primary(conn, analysis_id, reviewers.REVIEWER_SPECS[0])
     matrix = reviewers._load_matrix(conn, analysis_id, reviewers.REVIEWER_SPECS[0])

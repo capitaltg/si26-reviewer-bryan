@@ -226,6 +226,9 @@ def test_run_pipeline_ingests_and_vision_enriches_only_deck_pages(conn, monkeypa
     monkeypatch.setattr(
         pipeline.mapping, "run_mapping", lambda conn_, analysis_id_: None
     )
+    monkeypatch.setattr(
+        pipeline.reviewers, "run_review", lambda conn_, analysis_id_: None
+    )
     analysis_id = insert_analysis(conn)
 
     deck_bytes = (FIXTURES / "ctg_deck.pdf").read_bytes()
@@ -351,6 +354,9 @@ def test_run_pipeline_ingest_progress_details_use_document_loop_index(
     )
     monkeypatch.setattr(
         pipeline.mapping, "run_mapping", lambda conn_, analysis_id_: None
+    )
+    monkeypatch.setattr(
+        pipeline.reviewers, "run_review", lambda conn_, analysis_id_: None
     )
     analysis_id = insert_analysis(conn)
 

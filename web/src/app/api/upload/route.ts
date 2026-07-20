@@ -1,9 +1,7 @@
-import { head } from "@vercel/blob";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { uploads } from "@/db/schema";
 import { getUserId } from "@/lib/session";
+import { recordCompletedUpload } from "@/lib/uploads";
 
 const ALLOWED_CONTENT_TYPES = [
   "application/pdf",
@@ -37,28 +35,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         if (!parsed.userId) {
           throw new Error("upload token payload missing userId");
         }
-        let contentType = blob.contentType ?? "application/octet-stream";
-        let sizeBytes = 0;
-        try {
-          const info = await head(blob.url);
-          sizeBytes = info.size;
-          contentType = info.contentType ?? contentType;
-        } catch (error) {
-          // head() lookup is best-effort; fall back to blob.contentType and size 0
-          // so the upload row is still recorded even if metadata fetch fails.
-          console.warn("upload: head() lookup failed", blob.pathname, error);
-        }
-        await db
-          .insert(uploads)
-          .values({
-            userId: parsed.userId,
-            blobPathname: blob.pathname,
-            blobUrl: blob.url,
-            displayName: blob.pathname.split("/").at(-1) ?? blob.pathname,
-            contentType,
-            sizeBytes,
-          })
-          .onConflictDoNothing({ target: uploads.blobPathname });
+        await recordCompletedUpload({
+          userId: parsed.userId,
+          blobPathname: blob.pathname,
+          blobUrl: blob.url,
+          fallbackContentType: blob.contentType ?? undefined,
+        });
       },
     });
     return NextResponse.json(jsonResponse);

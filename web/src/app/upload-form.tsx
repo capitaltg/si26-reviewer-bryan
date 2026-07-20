@@ -82,6 +82,24 @@ export function UploadForm() {
           access: "private",
           handleUploadUrl: "/api/upload",
         });
+        // In production, Vercel Blob's onUploadCompleted webhook records the
+        // uploads row. That webhook can't reach localhost, so in local dev we
+        // record it directly via the dev-only completion endpoint.
+        if (process.env.NODE_ENV !== "production") {
+          const done = await fetch("/api/upload/complete", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              blobPathname: blob.pathname,
+              blobUrl: blob.url,
+            }),
+          });
+          if (!done.ok) {
+            throw new Error(
+              `dev upload completion failed: ${(await done.text()) || done.status}`,
+            );
+          }
+        }
         uploaded.push({
           kind: doc.kind,
           displayName: doc.file.name,

@@ -91,6 +91,11 @@ git add -A
 git commit -m "feat(web): persist blob url + content type from uploads through to documents"
 ```
 
+**Local-dev gotcha (upload → analyze):** `uploads` rows are written only by the `onUploadCompleted` webhook, which Vercel Blob calls back over the public internet — it **cannot reach `localhost`**. So in local dev the row is never written, and `POST /api/analyses` fails with `"one or more uploads are missing or not owned by current user"` even though the blob upload itself succeeded. This is a Vercel Blob limitation, not a logic bug — production (where the webhook reaches the deployed URL) is unaffected. Fix: a dev-only completion path gated on `NODE_ENV` (mirrors `AUTH_DEV_LOGIN` in `web/src/auth.ts`):
+- `web/src/lib/uploads.ts` — shared `recordCompletedUpload()` (server-side `head()` verify + idempotent insert), used by both the prod webhook and the dev endpoint.
+- `web/src/app/api/upload/complete/route.ts` — dev-only endpoint; returns 404 in production so it can never bypass the trusted webhook.
+- `web/src/app/upload-form.tsx` — in dev only, POSTs `{blobPathname, blobUrl}` to `/api/upload/complete` after each `upload()` resolves.
+
 ---
 
 ### Task 2: Worker Blob access (static token, Node upload helper)

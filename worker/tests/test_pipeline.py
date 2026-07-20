@@ -75,6 +75,7 @@ def _fake_vision_client(monkeypatch, response):
 def test_run_pipeline_orders_extraction_and_mapping_after_script_alignment(
     conn, monkeypatch
 ):
+    monkeypatch.setattr(pipeline, "STAGE_SLEEP_SECONDS", 0)
     analysis_id = insert_analysis(conn)
     for kind, display_name in (
         ("deck", "deck.pdf"),
@@ -146,6 +147,35 @@ def test_run_pipeline_orders_extraction_and_mapping_after_script_alignment(
         "review",
         "report",
     ]
+
+    assert [
+        (event, detail)
+        for event, detail in events
+        if event in {"extract", "map"}
+    ] == [
+        ("extract", "extracting solicitation requirements"),
+        ("map", "mapping requirements to proposal content"),
+    ]
+
+    def assert_updates_precede_work(stage, work):
+        update_indices = [
+            index for index, (event, _) in enumerate(events) if event == stage
+        ]
+        work_indices = [
+            index for index, (event, _) in enumerate(events) if event == work
+        ]
+        assert len(update_indices) == len(work_indices)
+        assert all(
+            update_index < work_index
+            for update_index, work_index in zip(update_indices, work_indices)
+        )
+
+    assert_updates_precede_work("ingest", "ingest_work")
+    assert_updates_precede_work("vision", "vision_work")
+    assert_updates_precede_work("script_align", "script_align_work")
+    assert_updates_precede_work("extract", "extract_work")
+    assert_updates_precede_work("map", "map_work")
+
     work_events = [event for event, _ in events if event.endswith("_work")]
     assert work_events.index("extract_work") < work_events.index("map_work")
 
@@ -254,11 +284,17 @@ def test_run_pipeline_skips_script_align_stage_when_no_script_document(
     'script_align' stage must never even be emitted via jobs.update_stage
     (not merely a no-op call)."""
     monkeypatch.setattr(pipeline, "STAGE_SLEEP_SECONDS", 0)
+    extract_calls: list[tuple] = []
+    mapping_calls: list[tuple] = []
     monkeypatch.setattr(
-        pipeline.extract, "run_extraction", lambda conn_, analysis_id_: None
+        pipeline.extract,
+        "run_extraction",
+        lambda conn_, analysis_id_: extract_calls.append((conn_, analysis_id_)),
     )
     monkeypatch.setattr(
-        pipeline.mapping, "run_mapping", lambda conn_, analysis_id_: None
+        pipeline.mapping,
+        "run_mapping",
+        lambda conn_, analysis_id_: mapping_calls.append((conn_, analysis_id_)),
     )
     analysis_id = insert_analysis(conn)
 
@@ -280,6 +316,8 @@ def test_run_pipeline_skips_script_align_stage_when_no_script_document(
     assert "vision" in stages_seen
     assert "review" in stages_seen
     assert "report" in stages_seen
+    assert extract_calls == []
+    assert mapping_calls == []
 
 
 def test_run_pipeline_ingest_progress_details_use_document_loop_index(

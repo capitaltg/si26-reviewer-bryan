@@ -1,23 +1,22 @@
 """Pipeline stages: ingest -> vision -> script_align (optional) -> extract
--> map -> review (stub) -> report (stub).
+-> map -> review -> report (stub).
 
-The ingest, vision, script_align, extract, and map stages perform real work;
-review and report stay stub sleeps until their own phases land. The signature
-and the update_stage/complete/fail contract stay the same as the Phase 1 stub.
+The ingest, vision, script_align, extract, map, and review stages perform real
+work; report stays a stub sleep until its own phase lands. The signature and
+the update_stage/complete/fail contract stay the same as the Phase 1 stub.
 """
 
 import time
 
 import psycopg
 
-from . import extract, ingest, jobs, mapping, script_align, vision
+from . import extract, ingest, jobs, mapping, reviewers, script_align, vision
 
 STAGE_SLEEP_SECONDS = 2
 
 # Stub stages only -- real stages are driven directly by run_pipeline below
 # rather than this list.
 STUB_STAGES = [
-    ("review", "running reviewers (stub)"),
     ("report", "assembling report (stub)"),
 ]
 
@@ -45,6 +44,10 @@ def run_pipeline(conn: psycopg.Connection, analysis_id: str) -> None:
             conn, analysis_id, "map", "mapping requirements to proposal content"
         )
         mapping.run_mapping(conn, analysis_id)
+        jobs.update_stage(
+            conn, analysis_id, "review", "running compliance / technical / evaluator reviewers"
+        )
+        reviewers.run_review(conn, analysis_id)
 
     for stage, detail in STUB_STAGES:
         jobs.update_stage(conn, analysis_id, stage, detail)

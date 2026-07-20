@@ -72,7 +72,7 @@ def _fake_vision_client(monkeypatch, response):
     return fake_client.messages
 
 
-def test_run_pipeline_orders_extraction_and_mapping_after_script_alignment(
+def test_run_pipeline_orders_review_after_mapping(
     conn, monkeypatch
 ):
     monkeypatch.setattr(pipeline, "STAGE_SLEEP_SECONDS", 0)
@@ -121,6 +121,11 @@ def test_run_pipeline_orders_extraction_and_mapping_after_script_alignment(
         lambda conn_, analysis_id_: events.append(("map_work", None)),
     )
     monkeypatch.setattr(
+        pipeline.reviewers,
+        "run_review",
+        lambda conn_, analysis_id_: events.append(("review_work", None)),
+    )
+    monkeypatch.setattr(
         pipeline.jobs,
         "update_stage",
         lambda conn_, analysis_id_, stage, detail=None: events.append((stage, detail)),
@@ -151,10 +156,14 @@ def test_run_pipeline_orders_extraction_and_mapping_after_script_alignment(
     assert [
         (event, detail)
         for event, detail in events
-        if event in {"extract", "map"}
+        if event in {"extract", "map", "review"}
     ] == [
         ("extract", "extracting solicitation requirements"),
         ("map", "mapping requirements to proposal content"),
+        (
+            "review",
+            "running compliance / technical / evaluator reviewers",
+        ),
     ]
 
     def assert_updates_precede_work(stage, work):
@@ -175,9 +184,12 @@ def test_run_pipeline_orders_extraction_and_mapping_after_script_alignment(
     assert_updates_precede_work("script_align", "script_align_work")
     assert_updates_precede_work("extract", "extract_work")
     assert_updates_precede_work("map", "map_work")
+    assert_updates_precede_work("review", "review_work")
 
     work_events = [event for event, _ in events if event.endswith("_work")]
     assert work_events.index("extract_work") < work_events.index("map_work")
+    assert work_events.index("map_work") < work_events.index("review_work")
+    assert pipeline.STUB_STAGES == [("report", "assembling report (stub)")]
 
 
 def _insert_document(
@@ -314,7 +326,7 @@ def test_run_pipeline_skips_script_align_stage_when_no_script_document(
     # Sanity check the spy actually observed the real stages, so an empty
     # `recorded` list (e.g. from a broken monkeypatch) can't pass vacuously.
     assert "vision" in stages_seen
-    assert "review" in stages_seen
+    assert "review" not in stages_seen
     assert "report" in stages_seen
     assert extract_calls == []
     assert mapping_calls == []

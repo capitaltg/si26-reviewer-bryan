@@ -1,6 +1,8 @@
 import {
+  AnyPgColumn,
   boolean,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -23,6 +25,21 @@ export const documentKindEnum = pgEnum("document_kind", [
   "solicitation_attachment",
   "deck",
   "script",
+]);
+
+export const requirementSourceEnum = pgEnum("requirement_source", [
+  "L",
+  "M",
+  "SOW",
+  "limit",
+  "FAR",
+  "amendment",
+]);
+
+export const mappingStatusEnum = pgEnum("mapping_status", [
+  "covered",
+  "partial",
+  "missing",
 ]);
 
 export const users = pgTable("users", {
@@ -105,3 +122,32 @@ export const pages = pgTable(
     ),
   ],
 );
+
+export const requirements = pgTable("requirements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  analysisId: uuid("analysis_id")
+    .notNull()
+    .references(() => analyses.id, { onDelete: "cascade" }),
+  sourceDocumentId: uuid("source_document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  source: requirementSourceEnum("source").notNull(),
+  ref: text("ref").notNull(),
+  text: text("text").notNull(),
+  pageNo: integer("page_no").notNull(),
+  weight: text("weight"),
+  supersedesRequirementId: uuid("supersedes_requirement_id").references(
+    (): AnyPgColumn => requirements.id,
+  ),
+});
+
+export const mappings = pgTable("mappings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requirementId: uuid("requirement_id")
+    .notNull()
+    .unique()
+    .references(() => requirements.id, { onDelete: "cascade" }),
+  status: mappingStatusEnum("status").notNull(),
+  slideRefs: jsonb("slide_refs").notNull(),
+  rationale: text("rationale").notNull(),
+});

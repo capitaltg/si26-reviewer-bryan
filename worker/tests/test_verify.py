@@ -1,3 +1,5 @@
+import pytest
+
 from worker import verify
 from worker.verify import (
     DeckPage,
@@ -73,6 +75,25 @@ def test_observation_verified_by_native_text():
     assert result.proposal_verified is True
     assert result.evidence_provenance == "native_text"
     assert result.evidence["proposal"] == {"slide": 1, "quote": "phased rollout"}
+
+
+def test_provenance_prefers_native_text_over_script_and_vision():
+    base_ctx = _ctx()
+    ctx = VerificationContext(
+        solicitation_pages=base_ctx.solicitation_pages,
+        deck_pages={
+            1: DeckPage(
+                slide=1,
+                native_text="phased rollout",
+                script_text="phased rollout",
+                vision_summary="phased rollout",
+            )
+        },
+    )
+
+    result = verify.verify_findings([_observation()], ctx)[0]
+
+    assert result.evidence_provenance == "native_text"
 
 
 def test_provenance_prefers_script_over_vision():
@@ -207,3 +228,8 @@ def test_matching_is_whitespace_and_case_insensitive():
         solicitation=SolicitationCitation(DOC, "base.pdf", "L.1", 2, "PROVIDE   THE approach"),
     ))
     assert result.solicitation_verified is True
+
+
+def test_invalid_finding_kind_is_rejected():
+    with pytest.raises(ValueError, match="finding_kind"):
+        _observation(finding_kind="unsupported")

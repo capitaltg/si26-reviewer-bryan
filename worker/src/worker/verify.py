@@ -7,6 +7,7 @@ no database access, no network, no I/O.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,7 @@ class VerificationContext:
 @dataclass(frozen=True)
 class ResolvedFinding:
     reviewer: str
-    finding_kind: str  # "gap" | "observation"
+    finding_kind: Literal["gap", "observation"]
     severity: str
     confidence: str
     requirement_id: str | None
@@ -46,6 +47,10 @@ class ResolvedFinding:
     suggestion: str
     searched_scope: str | None
     requirement_citation: tuple[str, str, int] | None
+
+    def __post_init__(self) -> None:
+        if self.finding_kind not in ("gap", "observation"):
+            raise ValueError("finding_kind must be 'gap' or 'observation'")
 
 
 @dataclass(frozen=True)
@@ -128,9 +133,7 @@ def _match_provenance(finding: ResolvedFinding, ctx: VerificationContext) -> str
     return None
 
 
-def _build_evidence(
-    finding: ResolvedFinding, provenance: str | None
-) -> dict:
+def _build_evidence(finding: ResolvedFinding) -> dict:
     solicitation = {
         "document_id": finding.solicitation.document_id,
         "document_name": finding.solicitation.document_name,
@@ -181,5 +184,5 @@ def _verify_one(finding: ResolvedFinding, ctx: VerificationContext) -> VerifiedF
             if structural_failure
             else "verified" if applicable_pass else "unverified"
         ),
-        evidence=_build_evidence(finding, provenance),
+        evidence=_build_evidence(finding),
     )

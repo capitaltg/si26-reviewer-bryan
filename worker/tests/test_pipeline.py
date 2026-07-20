@@ -308,6 +308,12 @@ def test_run_pipeline_skips_script_align_stage_when_no_script_document(
         "run_mapping",
         lambda conn_, analysis_id_: mapping_calls.append((conn_, analysis_id_)),
     )
+    review_calls: list[tuple] = []
+    monkeypatch.setattr(
+        pipeline.reviewers,
+        "run_review",
+        lambda conn_, analysis_id_: review_calls.append((conn_, analysis_id_)),
+    )
     analysis_id = insert_analysis(conn)
 
     recorded: list[tuple] = []
@@ -330,6 +336,7 @@ def test_run_pipeline_skips_script_align_stage_when_no_script_document(
     assert "report" in stages_seen
     assert extract_calls == []
     assert mapping_calls == []
+    assert review_calls == []
 
 
 def test_run_pipeline_ingest_progress_details_use_document_loop_index(

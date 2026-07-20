@@ -29,7 +29,11 @@ from . import blob
 # inference-profile ID rather than the bare model ID; the `us.` profile keeps
 # inference in US regions, so AWS_REGION must be a US region.
 MODEL = "us.anthropic.claude-opus-4-8"
-MAX_TOKENS = 1024
+# A dense slide (org chart, schedule table) can need a long summary. A
+# `max_tokens` stop reason is treated as untrusted and aborts the whole
+# analysis (see _UNTRUSTED_STOP_REASONS), so this budget must be generous
+# enough that a legitimate summary never truncates.
+MAX_TOKENS = 4096
 
 # Stop reasons that mean the parsed output must not be trusted: a refusal
 # never produced a real summary, and a max_tokens cutoff may have produced a

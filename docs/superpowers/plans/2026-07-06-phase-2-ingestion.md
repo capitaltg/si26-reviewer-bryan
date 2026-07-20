@@ -411,8 +411,10 @@ git commit -m "feat(worker): ingest stage — pptx conversion, page rendering, n
 
 **Interfaces:**
 
-- Consumes: `pages` rows for `deck` documents, `ANTHROPIC_API_KEY` env var.
+- Consumes: `pages` rows for `deck` documents, AWS Bedrock credentials (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION`).
 - Produces: `pages.vision_summary` populated for every deck page.
+
+> **As built:** Claude is reached through **AWS Bedrock classic InvokeModel** (`AnthropicBedrock`, `us.anthropic.claude-opus-4-8`), not the Anthropic Console API. Bedrock rejects `messages.parse()`/`output_config.format` and `strict:true` tools, so structured output comes from a **forced `record_vision_summary` tool call** read client-side (no Pydantic model). See `web/.env.production.notes.md` for the authoritative env var matrix — **do not** re-add `ANTHROPIC_API_KEY`.
 
 - [ ] **Step 1: Implement**
 
@@ -552,7 +554,11 @@ git commit -m "test(worker): commit real SA5/CTG fixtures for ingestion regressi
 
 - [ ] **Step 1: Railway env vars**
 
-Add to the Railway worker service: `BLOB_READ_WRITE_TOKEN` (the static token generated for this store), `ANTHROPIC_API_KEY`.
+Add to the Railway worker service: `BLOB_READ_WRITE_TOKEN` (the static token generated for this store) and the AWS Bedrock credentials `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` (a **US** region, for the `us.` inference profile). **Not** `ANTHROPIC_API_KEY` — the vision pass uses Bedrock (see Task 6 as-built note).
+
+> **Deploy checklist (from code review):**
+> - **NOT NULL migration guard.** `web/drizzle/0001_orange_newton_destine.sql` adds `documents.blob_url`, `documents.content_type`, and `uploads.blob_url` as `NOT NULL` with no default/backfill. This is safe only because the production tables are empty pre-first-deploy. If any rows exist before this migration runs, first add the columns nullable → backfill → `SET NOT NULL`.
+> - **Duplicate-upload UX (minor).** `POST /api/analyses` returns "one or more uploads are missing or not owned" if a client sends the same `blobPathname` twice (the owned-rows count check fails on the de-duplicated result). Harmless but misleading; de-dupe or clarify the message if it surfaces.
 
 - [ ] **Step 2: Update env var matrix**
 

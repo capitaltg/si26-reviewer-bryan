@@ -124,7 +124,10 @@ def align_script(conn: psycopg.Connection, analysis_id: str) -> None:
         (analysis_id,),
     ).fetchone()
     script_bytes = blob.download(script_row[0])
-    script_text = script_bytes.decode("utf-8")
+    # Scripts come from a user upload slot that isn't guaranteed to be valid
+    # UTF-8; decode leniently so an odd byte degrades one character rather
+    # than crashing the stage with a bare UnicodeDecodeError.
+    script_text = script_bytes.decode("utf-8", errors="replace")
 
     slides = parse_script(script_text)
 

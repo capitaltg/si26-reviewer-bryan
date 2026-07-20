@@ -97,7 +97,23 @@ def test_provenance_prefers_native_text_over_script_and_vision():
 
 
 def test_provenance_prefers_script_over_vision():
-    result = _one(_observation(proposal_quote="narrate the phased"))
+    base_ctx = _ctx()
+    ctx = VerificationContext(
+        solicitation_pages=base_ctx.solicitation_pages,
+        deck_pages={
+            1: DeckPage(
+                slide=1,
+                native_text="Our approach is a phased rollout.",
+                script_text="We narrate the timeline here.",
+                vision_summary="Timeline bar chart of three phases.",
+            )
+        },
+    )
+
+    result = verify.verify_findings(
+        [_observation(proposal_quote="timeline")], ctx
+    )[0]
+
     assert result.evidence_provenance == "script"
     assert result.proposal_verified is True
 

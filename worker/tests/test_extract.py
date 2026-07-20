@@ -1,3 +1,6 @@
+import copy
+
+import psycopg
 import pytest
 
 from conftest import insert_analysis
@@ -6,6 +9,10 @@ from worker import extract
 
 BASE_DOCUMENT_ID = "00000000-0000-0000-0000-000000000001"
 AMENDMENT_DOCUMENT_ID = "00000000-0000-0000-0000-000000000002"
+QA_DOCUMENT_ID = "00000000-0000-0000-0000-000000000004"
+ATTACHMENT_DOCUMENT_ID = "00000000-0000-0000-0000-000000000005"
+DECK_DOCUMENT_ID = "00000000-0000-0000-0000-000000000003"
+SCRIPT_DOCUMENT_ID = "00000000-0000-0000-0000-000000000006"
 
 
 class _FakeToolUseBlock:
@@ -108,7 +115,43 @@ def _package(conn):
         display_name="amendment.pdf",
     )
     _insert_page(conn, base_id, 1, "Section L.1: provide an approach.")
-    _insert_page(conn, amendment_id, 1, "Amendment changes Section L.1.")
+    _insert_page(conn, base_id, 2, "Base page two native text.")
+    _insert_page(conn, amendment_id, 1, "Amendment page one native text.")
+    _insert_page(conn, amendment_id, 2, "Amendment changes Section L.1.")
+    _insert_document(
+        conn,
+        analysis_id,
+        document_id=QA_DOCUMENT_ID,
+        kind="solicitation_q_and_a",
+        display_name="questions.pdf",
+    )
+    _insert_page(conn, QA_DOCUMENT_ID, 1, "Q&A page one native text.")
+    _insert_page(conn, QA_DOCUMENT_ID, 2, "Q&A page two native text.")
+    _insert_document(
+        conn,
+        analysis_id,
+        document_id=ATTACHMENT_DOCUMENT_ID,
+        kind="solicitation_attachment",
+        display_name="attachment.pdf",
+    )
+    _insert_page(conn, ATTACHMENT_DOCUMENT_ID, 1, "Attachment page one native text.")
+    _insert_page(conn, ATTACHMENT_DOCUMENT_ID, 2, "Attachment page two native text.")
+    _insert_document(
+        conn,
+        analysis_id,
+        document_id=DECK_DOCUMENT_ID,
+        kind="deck",
+        display_name="deck.pptx",
+    )
+    _insert_page(conn, DECK_DOCUMENT_ID, 1, "Proposal slide text must not enter extraction.")
+    _insert_document(
+        conn,
+        analysis_id,
+        document_id=SCRIPT_DOCUMENT_ID,
+        kind="script",
+        display_name="script.txt",
+    )
+    _insert_page(conn, SCRIPT_DOCUMENT_ID, 1, "Narration text must not enter extraction.")
     return analysis_id, base_id, amendment_id
 
 
@@ -135,8 +178,50 @@ def _valid_input():
                 "weight": "high",
                 "supersedes_key": "l-1",
             },
+            {
+                "key": "m-1",
+                "source_document": 3,
+                "source": "M",
+                "ref": "M.1",
+                "text": "The technical approach is evaluated.",
+                "page_no": 1,
+                "weight": "high",
+                "supersedes_key": None,
+            },
+            {
+                "key": "sow-1",
+                "source_document": 4,
+                "source": "SOW",
+                "ref": "PWS.1",
+                "text": "Perform the required service.",
+                "page_no": 2,
+                "weight": None,
+                "supersedes_key": None,
+            },
+            {
+                "key": "amendment-note-1",
+                "source_document": 2,
+                "source": "amendment",
+                "ref": "A.1",
+                "text": "The submission date changed.",
+                "page_no": 1,
+                "weight": None,
+                "supersedes_key": None,
+            },
         ]
     }
+
+
+def _first_requirement_with(**changes):
+    value = copy.deepcopy(_valid_input())
+    value["requirements"][0].update(changes)
+    return value
+
+
+def _first_requirement_without(field):
+    value = copy.deepcopy(_valid_input())
+    del value["requirements"][0][field]
+    return value
 
 
 def _requirement_rows(conn, analysis_id):
@@ -154,37 +239,56 @@ def _requirement_rows(conn, analysis_id):
 
 def test_run_extraction_resolves_document_handles_and_supersession(conn, monkeypatch):
     analysis_id, base_id, amendment_id = _package(conn)
-    deck_id = _insert_document(
-        conn,
-        analysis_id,
-        document_id="00000000-0000-0000-0000-000000000003",
-        kind="deck",
-        display_name="deck.pptx",
-    )
-    _insert_page(conn, deck_id, 1, "Proposal slide text must not enter extraction.")
     messages = _fake_client(monkeypatch, [_FakeMessage("tool_use", _valid_input())])
 
     extract.run_extraction(conn, analysis_id)
 
     rows = _requirement_rows(conn, analysis_id)
-    assert len(rows) == 2
-    base_row, amendment_row = rows
+    assert len(rows) == 5
+    rows_by_ref = {row[3]: row for row in rows}
+    base_row = rows_by_ref["L.1"]
+    amendment_row = rows_by_ref["L.1 revised"]
     assert str(base_row[1]) == base_id
     assert str(amendment_row[1]) == amendment_id
+    assert amendment_row[2] == "L"
     assert amendment_row[7] == base_row[0]
+    assert str(rows_by_ref["M.1"][1]) == QA_DOCUMENT_ID
+    assert rows_by_ref["M.1"][2] == "M"
+    assert str(rows_by_ref["PWS.1"][1]) == ATTACHMENT_DOCUMENT_ID
+    assert rows_by_ref["PWS.1"][2] == "SOW"
+    assert rows_by_ref["A.1"][2] == "amendment"
     assert len(messages.calls) == 1
-    prompt = messages.calls[0]["messages"][0]["content"][0]["text"]
+    request = messages.calls[0]
+    assert request["max_tokens"] == 16_384
+    assert len(request["tools"]) == 1
+    assert request["tools"][0] == extract.EXTRACTION_TOOL
+    assert request["tools"][0]["name"] == "record_extraction"
+    assert request["tool_choice"] == {
+        "type": "tool",
+        "name": "record_extraction",
+    }
+    prompt = request["messages"][0]["content"][0]["text"]
     assert "[doc 1] solicitation_base — base.pdf" in prompt
     assert "page 1: Section L.1: provide an approach." in prompt
+    assert "page 2: Base page two native text." in prompt
     assert "[doc 2] solicitation_amendment — amendment.pdf" in prompt
-    assert "page 1: Amendment changes Section L.1." in prompt
+    assert "page 1: Amendment page one native text." in prompt
+    assert "page 2: Amendment changes Section L.1." in prompt
+    assert "[doc 3] solicitation_q_and_a — questions.pdf" in prompt
+    assert "page 1: Q&A page one native text." in prompt
+    assert "page 2: Q&A page two native text." in prompt
+    assert "[doc 4] solicitation_attachment — attachment.pdf" in prompt
+    assert "page 1: Attachment page one native text." in prompt
+    assert "page 2: Attachment page two native text." in prompt
+    assert prompt.index("[doc 1]") < prompt.index("[doc 2]")
+    assert prompt.index("[doc 2]") < prompt.index("[doc 3]")
+    assert prompt.index("[doc 3]") < prompt.index("[doc 4]")
     assert "An amendment revision to any of" in prompt
+    assert "Use source amendment only for a change note that is not itself" in prompt
     assert "deck.pptx" not in prompt
     assert "Proposal slide text" not in prompt
-    assert messages.calls[0]["tool_choice"] == {
-        "type": "tool",
-        "name": extract.EXTRACTION_TOOL["name"],
-    }
+    assert "script.txt" not in prompt
+    assert "Narration text" not in prompt
 
 
 def test_run_extraction_replaces_previous_rows(conn, monkeypatch):
@@ -227,7 +331,7 @@ def test_run_extraction_replaces_previous_rows(conn, monkeypatch):
         {
             **_valid_input(),
             "requirements": [
-                {**_valid_input()["requirements"][0], "source_document": 3}
+                {**_valid_input()["requirements"][0], "source_document": 5}
             ],
         },
         {
@@ -290,6 +394,67 @@ def test_run_extraction_rejects_missing_or_misnamed_tool_input(
         extract.run_extraction(conn, analysis_id)
 
     assert _requirement_rows(conn, analysis_id) == []
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        _first_requirement_with(source="not-a-source"),
+        _first_requirement_without("text"),
+        _first_requirement_with(unexpected_field="not allowed"),
+        _first_requirement_with(source_document=0),
+        _first_requirement_with(page_no=0),
+    ],
+)
+def test_run_extraction_rejects_malformed_pydantic_input(conn, monkeypatch, tool_input):
+    analysis_id, _, _ = _package(conn)
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", tool_input)])
+
+    with pytest.raises(extract.ExtractionError):
+        extract.run_extraction(conn, analysis_id)
+
+    assert _requirement_rows(conn, analysis_id) == []
+
+
+def test_run_extraction_rolls_back_replacement_after_database_failure(
+    conn, monkeypatch
+):
+    analysis_id, base_id, _ = _package(conn)
+    existing_id = conn.execute(
+        """
+        INSERT INTO requirements
+            (analysis_id, source_document_id, source, ref, text, page_no)
+        VALUES (%s, %s, 'L', 'OLD.1', 'Keep this existing row.', 1)
+        RETURNING id
+        """,
+        (analysis_id, base_id),
+    ).fetchone()[0]
+    conn.execute(
+        """
+        CREATE FUNCTION fail_extraction_insert() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'forced extraction insert failure';
+        END;
+        $$ LANGUAGE plpgsql
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER fail_extraction_insert_trigger
+        BEFORE INSERT ON requirements
+        FOR EACH ROW EXECUTE FUNCTION fail_extraction_insert()
+        """
+    )
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", _valid_input())])
+
+    with pytest.raises(psycopg.Error, match="forced extraction insert failure"):
+        extract.run_extraction(conn, analysis_id)
+
+    rows = _requirement_rows(conn, analysis_id)
+    assert len(rows) == 1
+    assert rows[0][0] == existing_id
+    assert rows[0][3] == "OLD.1"
+    assert rows[0][4] == "Keep this existing row."
 
 
 def test_run_extraction_rejects_oversized_prompt_without_splitting(

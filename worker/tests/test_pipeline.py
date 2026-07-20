@@ -37,10 +37,22 @@ class _FakeBlobStore:
         return blob.BlobResult(url=url, pathname=pathname)
 
 
+class _FakeToolUseBlock:
+    type = "tool_use"
+
+    def __init__(self, name, input):
+        self.name = name
+        self.input = input
+
+
 class _FakeMessage:
-    def __init__(self, stop_reason, parsed_output=None):
+    def __init__(self, stop_reason, summary=None):
         self.stop_reason = stop_reason
-        self.parsed_output = parsed_output
+        self.content = (
+            []
+            if summary is None
+            else [_FakeToolUseBlock(vision.VISION_TOOL["name"], {"summary": summary})]
+        )
 
 
 class _FakeMessagesClient:
@@ -48,7 +60,7 @@ class _FakeMessagesClient:
         self.response = response
         self.calls: list[dict] = []
 
-    def parse(self, **kwargs):
+    def create(self, **kwargs):
         self.calls.append(kwargs)
         return self.response
 
@@ -119,7 +131,7 @@ def test_run_pipeline_ingests_and_vision_enriches_only_deck_pages(conn, monkeypa
     )
     _fake_vision_client(
         monkeypatch,
-        _FakeMessage("end_turn", vision.VisionSummary(summary="a vision summary")),
+        _FakeMessage("tool_use", "a vision summary"),
     )
 
     pipeline.run_pipeline(conn, analysis_id)

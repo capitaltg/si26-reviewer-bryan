@@ -20,14 +20,31 @@ class _FakeBlobStore:
         return self.download_bytes[url]
 
 
+class _FakeToolUseBlock:
+    type = "tool_use"
+
+    def __init__(self, name, input):
+        self.name = name
+        self.input = input
+
+
 class _FakeMessage:
-    def __init__(self, stop_reason, parsed_output=None):
+    """Mimics an anthropic Message: a `stop_reason` plus a `content` list of
+    blocks. `summary` is a convenience for the common case of a single forced
+    `record_vision_summary` tool call (None means no tool call, e.g. a
+    refusal)."""
+
+    def __init__(self, stop_reason, summary=None):
         self.stop_reason = stop_reason
-        self.parsed_output = parsed_output
+        self.content = (
+            []
+            if summary is None
+            else [_FakeToolUseBlock(vision.VISION_TOOL["name"], {"summary": summary})]
+        )
 
 
 class _FakeMessagesClient:
-    """Records every call to `.parse(...)` and returns queued fake
+    """Records every call to `.create(...)` and returns queued fake
     responses in order (or repeats the single queued response, if only one
     was given)."""
 
@@ -35,7 +52,7 @@ class _FakeMessagesClient:
         self.responses = list(responses)
         self.calls: list[dict] = []
 
-    def parse(self, **kwargs):
+    def create(self, **kwargs):
         self.calls.append(kwargs)
         if len(self.responses) == 1:
             return self.responses[0]
@@ -125,7 +142,7 @@ def test_run_vision_pass_calls_once_per_deck_page_and_skips_non_deck(
 
     messages_client = _fake_client(
         monkeypatch,
-        [_FakeMessage("end_turn", vision.VisionSummary(summary="a summary"))],
+        [_FakeMessage("tool_use", "a summary")],
     )
 
     vision.run_vision_pass(conn, analysis_id)
@@ -164,7 +181,7 @@ def test_run_vision_pass_raises_on_refusal_and_does_not_write_summary(
         monkeypatch,
         {f"https://blob.example/pages/{deck_id}/1.png": b"\x89PNG fake bytes"},
     )
-    _fake_client(monkeypatch, [_FakeMessage("refusal", None)])
+    _fake_client(monkeypatch, [_FakeMessage("refusal")])
 
     with pytest.raises(vision.VisionError):
         vision.run_vision_pass(conn, analysis_id)
@@ -188,7 +205,7 @@ def test_run_vision_pass_raises_on_max_tokens_and_does_not_write_summary(
     )
     _fake_client(
         monkeypatch,
-        [_FakeMessage("max_tokens", vision.VisionSummary(summary="truncated"))],
+        [_FakeMessage("max_tokens", "truncated")],
     )
 
     with pytest.raises(vision.VisionError):

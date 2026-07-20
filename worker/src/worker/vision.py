@@ -18,13 +18,17 @@ described, and no other document kind's pages are touched by this module.
 import base64
 from dataclasses import dataclass
 
-import anthropic
 import psycopg
-from pydantic import BaseModel
+from anthropic import AnthropicBedrock
 
 from . import blob
 
-MODEL = "claude-opus-4-8"
+# Claude is accessed through AWS Bedrock via the classic InvokeModel path
+# (bedrock:InvokeModel — the action the worker's IAM user is provisioned for,
+# not the newer bedrock-mantle:* actions). Newer models require a cross-region
+# inference-profile ID rather than the bare model ID; the `us.` profile keeps
+# inference in US regions, so AWS_REGION must be a US region.
+MODEL = "us.anthropic.claude-opus-4-8"
 MAX_TOKENS = 1024
 
 # Stop reasons that mean the parsed output must not be trusted: a refusal
@@ -48,9 +52,30 @@ carried by layout rather than by the text itself. Do not repeat the native \
 text verbatim -- focus on what a reader would only get by looking at the \
 image."""
 
-
-class VisionSummary(BaseModel):
-    summary: str
+# Structured output via a forced tool call. Classic Bedrock InvokeModel does
+# not support `output_config.format` (messages.parse) or `strict: true` on
+# tools -- both 400 -- so schema enforcement is client-side: we force this one
+# tool with tool_choice and read `summary` out of the tool_use block.
+VISION_TOOL = {
+    "name": "record_vision_summary",
+    "description": (
+        "Record the enriched visual description of this slide page."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": (
+                    "Dense description of what the image conveys beyond the "
+                    "native text."
+                ),
+            }
+        },
+        "required": ["summary"],
+        "additionalProperties": False,
+    },
+}
 
 
 class VisionError(Exception):
@@ -68,10 +93,13 @@ class Page:
     image_blob_url: str
 
 
-def _get_client() -> anthropic.Anthropic:
-    """Constructs the Anthropic client lazily so tests can monkeypatch this
-    function instead of needing ANTHROPIC_API_KEY set at import time."""
-    return anthropic.Anthropic()
+def _get_client() -> AnthropicBedrock:
+    """Constructs the Bedrock client lazily so tests can monkeypatch this
+    function instead of needing AWS credentials set at import time.
+
+    Credentials and region resolve from the standard AWS environment
+    (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION)."""
+    return AnthropicBedrock()
 
 
 def run_vision_pass(conn: psycopg.Connection, analysis_id: str) -> None:
@@ -109,9 +137,11 @@ def vision_pass_page(conn: psycopg.Connection, page: Page) -> None:
     image_b64 = base64.standard_b64encode(image_bytes).decode("ascii")
 
     client = _get_client()
-    response = client.messages.parse(
+    response = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
+        tools=[VISION_TOOL],
+        tool_choice={"type": "tool", "name": VISION_TOOL["name"]},
         messages=[
             {
                 "role": "user",
@@ -131,7 +161,6 @@ def vision_pass_page(conn: psycopg.Connection, page: Page) -> None:
                 ],
             }
         ],
-        output_format=VisionSummary,
     )
 
     if response.stop_reason in _UNTRUSTED_STOP_REASONS:
@@ -141,7 +170,24 @@ def vision_pass_page(conn: psycopg.Connection, page: Page) -> None:
             "possibly empty/truncated summary"
         )
 
+    # Pull the summary out of the forced tool call. If the model somehow
+    # didn't emit the tool call (or omitted the field), fail the page rather
+    # than write nothing / crash.
+    tool_use = next(
+        (
+            block
+            for block in response.content
+            if block.type == "tool_use" and block.name == VISION_TOOL["name"]
+        ),
+        None,
+    )
+    if tool_use is None or "summary" not in tool_use.input:
+        raise VisionError(
+            f"vision call for page {page.id} did not return a "
+            f"{VISION_TOOL['name']!r} tool call with a summary"
+        )
+
     conn.execute(
         "UPDATE pages SET vision_summary = %s WHERE id = %s",
-        (response.parsed_output.summary, page.id),
+        (tool_use.input["summary"], page.id),
     )

@@ -72,6 +72,84 @@ def _fake_vision_client(monkeypatch, response):
     return fake_client.messages
 
 
+def test_run_pipeline_orders_extraction_and_mapping_after_script_alignment(
+    conn, monkeypatch
+):
+    analysis_id = insert_analysis(conn)
+    for kind, display_name in (
+        ("deck", "deck.pdf"),
+        ("solicitation_base", "solicitation.pdf"),
+        ("script", "script.txt"),
+    ):
+        _insert_document(
+            conn,
+            analysis_id,
+            kind=kind,
+            content_type="text/plain" if kind == "script" else "application/pdf",
+            blob_pathname=f"orig/{display_name}",
+            blob_url=f"https://blob.example/{display_name}",
+            display_name=display_name,
+        )
+
+    events: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        pipeline.ingest,
+        "ingest_document",
+        lambda conn_, analysis_id_, document: events.append(
+            ("ingest_work", document.kind)
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline.vision,
+        "run_vision_pass",
+        lambda conn_, analysis_id_: events.append(("vision_work", None)),
+    )
+    monkeypatch.setattr(
+        pipeline.script_align,
+        "align_script",
+        lambda conn_, analysis_id_: events.append(("script_align_work", None)),
+    )
+    monkeypatch.setattr(
+        pipeline.extract,
+        "run_extraction",
+        lambda conn_, analysis_id_: events.append(("extract_work", None)),
+    )
+    monkeypatch.setattr(
+        pipeline.mapping,
+        "run_mapping",
+        lambda conn_, analysis_id_: events.append(("map_work", None)),
+    )
+    monkeypatch.setattr(
+        pipeline.jobs,
+        "update_stage",
+        lambda conn_, analysis_id_, stage, detail=None: events.append((stage, detail)),
+    )
+
+    pipeline.run_pipeline(conn, analysis_id)
+
+    stage_names = {
+        "ingest",
+        "vision",
+        "script_align",
+        "extract",
+        "map",
+        "review",
+        "report",
+    }
+    stages = [event for event, _ in events if event in stage_names]
+    assert list(dict.fromkeys(stages)) == [
+        "ingest",
+        "vision",
+        "script_align",
+        "extract",
+        "map",
+        "review",
+        "report",
+    ]
+    work_events = [event for event, _ in events if event.endswith("_work")]
+    assert work_events.index("extract_work") < work_events.index("map_work")
+
+
 def _insert_document(
     conn,
     analysis_id,
@@ -100,6 +178,12 @@ def test_run_pipeline_ingests_and_vision_enriches_only_deck_pages(conn, monkeypa
     (solicitation_base) fixtures through the real ingest + vision stages,
     with blob I/O and the Anthropic vision call faked out."""
     monkeypatch.setattr(pipeline, "STAGE_SLEEP_SECONDS", 0)
+    monkeypatch.setattr(
+        pipeline.extract, "run_extraction", lambda conn_, analysis_id_: None
+    )
+    monkeypatch.setattr(
+        pipeline.mapping, "run_mapping", lambda conn_, analysis_id_: None
+    )
     analysis_id = insert_analysis(conn)
 
     deck_bytes = (FIXTURES / "ctg_deck.pdf").read_bytes()
@@ -170,6 +254,12 @@ def test_run_pipeline_skips_script_align_stage_when_no_script_document(
     'script_align' stage must never even be emitted via jobs.update_stage
     (not merely a no-op call)."""
     monkeypatch.setattr(pipeline, "STAGE_SLEEP_SECONDS", 0)
+    monkeypatch.setattr(
+        pipeline.extract, "run_extraction", lambda conn_, analysis_id_: None
+    )
+    monkeypatch.setattr(
+        pipeline.mapping, "run_mapping", lambda conn_, analysis_id_: None
+    )
     analysis_id = insert_analysis(conn)
 
     recorded: list[tuple] = []
@@ -199,6 +289,12 @@ def test_run_pipeline_ingest_progress_details_use_document_loop_index(
     and its document-loop (not per-page) semantics, without needing a real
     LibreOffice/PyMuPDF conversion: ingest.ingest_document is stubbed out."""
     monkeypatch.setattr(pipeline, "STAGE_SLEEP_SECONDS", 0)
+    monkeypatch.setattr(
+        pipeline.extract, "run_extraction", lambda conn_, analysis_id_: None
+    )
+    monkeypatch.setattr(
+        pipeline.mapping, "run_mapping", lambda conn_, analysis_id_: None
+    )
     analysis_id = insert_analysis(conn)
 
     doc_a = _insert_document(

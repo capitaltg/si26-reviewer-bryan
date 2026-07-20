@@ -1,21 +1,21 @@
-"""Pipeline stages: ingest -> vision -> script_align (optional) -> review
-(stub) -> report (stub).
+"""Pipeline stages: ingest -> vision -> script_align (optional) -> extract
+-> map -> review (stub) -> report (stub).
 
-Phase 2 replaces the ingest/vision/script_align stages with real work;
-review and report stay stub sleeps until their own phases land. The
-signature and the update_stage/complete/fail contract stay the same as the
-Phase 1 stub."""
+The ingest, vision, script_align, extract, and map stages perform real work;
+review and report stay stub sleeps until their own phases land. The signature
+and the update_stage/complete/fail contract stay the same as the Phase 1 stub.
+"""
 
 import time
 
 import psycopg
 
-from . import ingest, jobs, script_align, vision
+from . import extract, ingest, jobs, mapping, script_align, vision
 
 STAGE_SLEEP_SECONDS = 2
 
-# Stub stages only -- ingest, vision, and script_align are real work now,
-# driven directly by run_pipeline below rather than this list.
+# Stub stages only -- real stages are driven directly by run_pipeline below
+# rather than this list.
 STUB_STAGES = [
     ("review", "running reviewers (stub)"),
     ("report", "assembling report (stub)"),
@@ -35,6 +35,16 @@ def run_pipeline(conn: psycopg.Connection, analysis_id: str) -> None:
             conn, analysis_id, "script_align", "aligning narration script to deck pages"
         )
         script_align.align_script(conn, analysis_id)
+
+    if _has_solicitation_document(conn, analysis_id):
+        jobs.update_stage(
+            conn, analysis_id, "extract", "extracting solicitation requirements"
+        )
+        extract.run_extraction(conn, analysis_id)
+        jobs.update_stage(
+            conn, analysis_id, "map", "mapping requirements to proposal content"
+        )
+        mapping.run_mapping(conn, analysis_id)
 
     for stage, detail in STUB_STAGES:
         jobs.update_stage(conn, analysis_id, stage, detail)
@@ -75,6 +85,16 @@ def _run_ingest_stage(conn: psycopg.Connection, analysis_id: str) -> None:
 def _has_script_document(conn: psycopg.Connection, analysis_id: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM documents WHERE analysis_id = %s AND kind = 'script'",
+        (analysis_id,),
+    ).fetchone()
+    return row is not None
+
+
+def _has_solicitation_document(conn: psycopg.Connection, analysis_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM documents WHERE analysis_id = %s AND kind IN "
+        "('solicitation_base', 'solicitation_amendment', "
+        "'solicitation_q_and_a', 'solicitation_attachment')",
         (analysis_id,),
     ).fetchone()
     return row is not None

@@ -8,6 +8,7 @@ from worker import reviewers
 
 BASE_DOC = "00000000-0000-0000-0000-0000000000a1"
 DECK_DOC = "00000000-0000-0000-0000-0000000000a2"
+OTHER_BASE_DOC = "00000000-0000-0000-0000-0000000000a3"
 
 
 class _FakeToolUseBlock:
@@ -140,6 +141,44 @@ def _findings_rows(conn, analysis_id):
     ).fetchall()
 
 
+def test_loaders_ignore_cross_analysis_requirements_and_supersession(conn):
+    analysis_id, l_id = _package(conn, with_m=False)
+    other_analysis_id = insert_analysis(conn)
+    _insert_document(conn, other_analysis_id, OTHER_BASE_DOC, "solicitation_base", "other.pdf")
+    _insert_page(conn, OTHER_BASE_DOC, 1, "Other analysis requirement.")
+
+    conn.execute(
+        """
+        INSERT INTO requirements
+            (analysis_id, source_document_id, source, ref, text, page_no,
+             supersedes_requirement_id)
+        VALUES (%s, %s, 'L', 'OTHER.1', 'Other superseding requirement.', 1, %s)
+        """,
+        (other_analysis_id, OTHER_BASE_DOC, l_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO requirements
+            (analysis_id, source_document_id, source, ref, text, page_no)
+        VALUES (%s, %s, 'L', 'FOREIGN.1', 'Foreign document requirement.', 1)
+        """,
+        (analysis_id, OTHER_BASE_DOC),
+    )
+    conn.execute(
+        """
+        INSERT INTO mappings (requirement_id, status, slide_refs, rationale)
+        VALUES (%s, 'covered', '[1]'::jsonb, 'Covered on slide 1.')
+        """,
+        (l_id,),
+    )
+
+    primary = reviewers._load_primary(conn, analysis_id, reviewers.REVIEWER_SPECS[0])
+    matrix = reviewers._load_matrix(conn, analysis_id, reviewers.REVIEWER_SPECS[0])
+
+    assert [(req.id, req.ref) for req in primary] == [(l_id, "L.1")]
+    assert [(row[0], row[1]) for row in matrix] == [("L.1", "L")]
+
+
 def test_run_review_resolves_handles_and_persists_verified(conn, monkeypatch):
     analysis_id, l_id = _package(conn, with_m=False)
     messages = _fake_client(monkeypatch, [_FakeMessage("tool_use", _observation_input())])
@@ -270,7 +309,7 @@ def test_failure_preserves_previous_complete_findings(conn, monkeypatch):
         page=2,
         solicitation_quote="Technical approach is most important.",
     )
-    _fake_client(
+    messages = _fake_client(
         monkeypatch,
         [
             _FakeMessage("tool_use", _observation_input()),
@@ -280,17 +319,37 @@ def test_failure_preserves_previous_complete_findings(conn, monkeypatch):
     reviewers.run_review(conn, analysis_id)
     before = _findings_rows(conn, analysis_id)
 
-    # A later reviewer fails after the compliance call already succeeded.
-    _fake_client(
+    # Both reviewer calls complete, but persistence receives an invalid row.
+    messages = _fake_client(
         monkeypatch,
         [
             _FakeMessage("tool_use", _observation_input()),
-            _FakeMessage("max_tokens"),
+            _FakeMessage("tool_use", evaluator_input),
         ],
     )
-    with pytest.raises(reviewers.ReviewError):
+
+    real_verify_findings = reviewers.verify.verify_findings
+
+    def invalid_verified_finding(findings, ctx):
+        verified = real_verify_findings(findings, ctx)
+        assert len(verified) == 2
+        first = verified[0]
+        return [
+            reviewers.verify.VerifiedFinding(
+                finding=first.finding,
+                solicitation_verified=first.solicitation_verified,
+                proposal_verified=False,
+                evidence_provenance=first.evidence_provenance,
+                verification=first.verification,
+                evidence=first.evidence,
+            )
+        ]
+
+    monkeypatch.setattr(reviewers.verify, "verify_findings", invalid_verified_finding)
+    with pytest.raises(psycopg.errors.CheckViolation):
         reviewers.run_review(conn, analysis_id)
 
+    assert len(messages.calls) == 2
     assert _findings_rows(conn, analysis_id) == before
 
 

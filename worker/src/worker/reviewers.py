@@ -254,17 +254,22 @@ def _load_primary(
         SELECT r.id, r.source, r.ref, r.text, r.page_no,
                r.source_document_id, d.display_name, r.weight, p.text
         FROM requirements r
-        JOIN documents d ON d.id = r.source_document_id
+        JOIN documents d
+          ON d.id = r.source_document_id
+         AND d.analysis_id = r.analysis_id
+         AND d.analysis_id = %s
         JOIN pages p
-          ON p.document_id = r.source_document_id AND p.page_no = r.page_no
+          ON p.document_id = d.id AND p.page_no = r.page_no
         WHERE r.analysis_id = %s
           AND r.source = ANY(%s::requirement_source[])
           AND NOT EXISTS (
-              SELECT 1 FROM requirements s WHERE s.supersedes_requirement_id = r.id
+              SELECT 1 FROM requirements s
+              WHERE s.analysis_id = r.analysis_id
+                AND s.supersedes_requirement_id = r.id
           )
         ORDER BY r.ref, r.id
         """,
-        (analysis_id, list(spec.primary_sources)),
+        (analysis_id, analysis_id, list(spec.primary_sources)),
     ).fetchall()
     return [
         _ResolvedReq(
@@ -287,7 +292,8 @@ def _load_matrix(
             WHERE r.analysis_id = %s
               AND NOT EXISTS (
                   SELECT 1 FROM requirements s
-                  WHERE s.supersedes_requirement_id = r.id
+                  WHERE s.analysis_id = r.analysis_id
+                    AND s.supersedes_requirement_id = r.id
               )
             ORDER BY r.ref
             """,
@@ -301,7 +307,8 @@ def _load_matrix(
           AND r.source = ANY(%s::requirement_source[])
           AND NOT EXISTS (
               SELECT 1 FROM requirements s
-              WHERE s.supersedes_requirement_id = r.id
+              WHERE s.analysis_id = r.analysis_id
+                AND s.supersedes_requirement_id = r.id
           )
         ORDER BY r.ref
         """,

@@ -102,6 +102,10 @@ def _insert_requirement(
     *,
     source,
     ref,
+    applies_to="deck",
+    obligation_type="content",
+    obligation_side="quoter",
+    classification_rationale="test classification",
     supersedes_requirement_id=None,
 ):
     return str(
@@ -109,8 +113,9 @@ def _insert_requirement(
             """
             INSERT INTO requirements
                 (analysis_id, source_document_id, source, ref, text, page_no,
-                 supersedes_requirement_id)
-            VALUES (%s, %s, %s, %s, %s, 1, %s)
+                 applies_to, obligation_type, obligation_side,
+                 classification_rationale, supersedes_requirement_id)
+            VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -119,6 +124,10 @@ def _insert_requirement(
                 source,
                 ref,
                 f"Requirement text for {ref}",
+                applies_to,
+                obligation_type,
+                obligation_side,
+                classification_rationale,
                 supersedes_requirement_id,
             ),
         ).fetchone()[0]
@@ -169,6 +178,9 @@ def _selected_requirement_ids(conn, analysis_id):
             FROM requirements
             WHERE requirements.analysis_id = %s
               AND requirements.source IN ('L', 'SOW')
+              AND requirements.applies_to = 'deck'
+              AND requirements.obligation_type = 'content'
+              AND requirements.obligation_side = 'quoter'
               AND NOT EXISTS (
                   SELECT 1
                   FROM requirements successor
@@ -179,6 +191,77 @@ def _selected_requirement_ids(conn, analysis_id):
             (analysis_id,),
         ).fetchall()
     ]
+
+
+def test_maps_only_effective_deck_content_for_the_quoter(conn, monkeypatch):
+    analysis_id, solicitation_id, _ = _deck_package(conn)
+    included = _insert_requirement(
+        conn, analysis_id, solicitation_id, source="L", ref="L.included"
+    )
+    _insert_requirement(
+        conn, analysis_id, solicitation_id, source="L", ref="L.other",
+        applies_to="other_component",
+    )
+    _insert_requirement(
+        conn, analysis_id, solicitation_id, source="L", ref="L.constraint",
+        obligation_type="constraint",
+    )
+    _insert_requirement(
+        conn, analysis_id, solicitation_id, source="L", ref="L.government",
+        obligation_side="government",
+    )
+    conn.execute(
+        """
+        INSERT INTO requirements
+            (analysis_id, source_document_id, source, ref, text, page_no)
+        VALUES (%s, %s, 'L', 'L.legacy', 'Legacy row.', 1)
+        """,
+        (analysis_id, solicitation_id),
+    )
+    _fake_client(
+        monkeypatch,
+        [_FakeMessage("tool_use", _mapping_input([included]))],
+    )
+
+    mapping.run_mapping(conn, analysis_id)
+
+    mapped = conn.execute("SELECT requirement_id FROM mappings").fetchall()
+    assert {str(row[0]) for row in mapped} == {included}
+
+
+@pytest.mark.parametrize("status", ["covered", "partial"])
+def test_positive_mapping_requires_a_slide(conn, monkeypatch, status):
+    analysis_id, solicitation_id, _ = _deck_package(conn)
+    requirement_id = _insert_requirement(
+        conn, analysis_id, solicitation_id, source="L", ref="L.1"
+    )
+    response = _mapping_input([requirement_id], slide_refs=[], status=status)
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", response)])
+
+    with pytest.raises(mapping.MappingError, match="slide reference"):
+        mapping.run_mapping(conn, analysis_id)
+
+
+def test_mapping_normalizes_slide_refs_and_rejects_blank_rationale(
+    conn, monkeypatch
+):
+    analysis_id, solicitation_id, _ = _deck_package(conn)
+    requirement_id = _insert_requirement(
+        conn, analysis_id, solicitation_id, source="L", ref="L.1"
+    )
+    normalized = _mapping_input([requirement_id], slide_refs=[2, 1, 2])
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", normalized)])
+    mapping.run_mapping(conn, analysis_id)
+    assert conn.execute(
+        "SELECT slide_refs FROM mappings WHERE requirement_id = %s",
+        (requirement_id,),
+    ).fetchone()[0] == [1, 2]
+
+    blank = _mapping_input([requirement_id])
+    blank["mappings"][0]["rationale"] = "   "
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", blank)])
+    with pytest.raises(mapping.MappingError, match="rationale"):
+        mapping.run_mapping(conn, analysis_id)
 
 
 def test_persists_only_effective_obligation_mappings_and_full_deck_context(

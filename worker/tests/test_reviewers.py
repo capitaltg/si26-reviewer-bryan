@@ -73,15 +73,34 @@ def _insert_page(conn, document_id, page_no, text, script_text=None, vision_summ
     )
 
 
-def _insert_requirement(conn, analysis_id, source, ref, text, page_no, weight=None):
+def _insert_requirement(
+    conn,
+    analysis_id,
+    source,
+    ref,
+    text,
+    page_no,
+    weight=None,
+    *,
+    applies_to="deck",
+    obligation_type="content",
+    obligation_side="quoter",
+    classification_rationale="test classification",
+):
     return str(conn.execute(
         """
         INSERT INTO requirements
-            (analysis_id, source_document_id, source, ref, text, page_no, weight)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (analysis_id, source_document_id, source, ref, text, page_no, weight,
+             applies_to, obligation_type, obligation_side,
+             classification_rationale)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
-        (analysis_id, BASE_DOC, source, ref, text, page_no, weight),
+        (
+            analysis_id, BASE_DOC, source, ref, text, page_no, weight,
+            applies_to, obligation_type, obligation_side,
+            classification_rationale,
+        ),
     ).fetchone()[0])
 
 
@@ -98,10 +117,72 @@ def _package(conn, *, with_m=True, with_sow=False):
                  vision_summary="Timeline chart of phases.")
     l_id = _insert_requirement(conn, analysis_id, "L", "L.1", "Provide the technical approach.", 1)
     if with_m:
-        _insert_requirement(conn, analysis_id, "M", "M.1", "Technical approach is most important.", 2, weight="most important")
+        _insert_requirement(
+            conn, analysis_id, "M", "M.1", "Technical approach is most important.", 2,
+            weight="most important", obligation_side="government",
+        )
     if with_sow:
         _insert_requirement(conn, analysis_id, "SOW", "SOW 2.1", "Use a phased rollout.", 3)
     return analysis_id, l_id
+
+
+def test_reviewer_primary_sets_exclude_non_deck_and_legacy_rows(conn):
+    analysis_id, included_id = _package(conn, with_m=False)
+    other_id = _insert_requirement(
+        conn, analysis_id, "L", "L.other", "Written response.", 1,
+        applies_to="other_component",
+    )
+    admin_id = _insert_requirement(
+        conn, analysis_id, "L", "L.admin", "Portal deadline.", 1,
+        applies_to="administrative",
+    )
+    legacy_id = str(conn.execute(
+        """
+        INSERT INTO requirements
+            (analysis_id, source_document_id, source, ref, text, page_no)
+        VALUES (%s, %s, 'L', 'L.legacy', 'Legacy row.', 1)
+        RETURNING id
+        """,
+        (analysis_id, BASE_DOC),
+    ).fetchone()[0])
+    for requirement_id in (included_id, other_id, admin_id, legacy_id):
+        conn.execute(
+            """
+            INSERT INTO mappings (requirement_id, status, slide_refs, rationale)
+            VALUES (%s, 'covered', '[1]'::jsonb, 'Pre-classification mapping.')
+            """,
+            (requirement_id,),
+        )
+
+    primary = reviewers._load_primary(
+        conn, analysis_id, reviewers.REVIEWER_SPECS[0]
+    )
+    matrix = reviewers._load_matrix(
+        conn, analysis_id, reviewers.REVIEWER_SPECS[0]
+    )
+
+    assert [(req.id, req.ref) for req in primary] == [(included_id, "L.1")]
+    assert [(row[0], row[1]) for row in matrix] == [("L.1", "L")]
+
+
+def test_compliance_prompt_marks_constraints_observation_only(conn):
+    analysis_id, _ = _package(conn, with_m=False)
+    _insert_requirement(
+        conn, analysis_id, "limit", "LIMIT.1", "Do not exceed 20 slides.", 1,
+        obligation_type="constraint",
+        classification_rationale="Deck slide-count constraint",
+    )
+    spec = reviewers.REVIEWER_SPECS[0]
+    primary = reviewers._load_primary(conn, analysis_id, spec)
+    req_by_handle, doc_by_handle, doc_handle_by_id = reviewers._assign_handles(primary)
+    prompt = reviewers._build_prompt(
+        spec, req_by_handle, doc_by_handle, doc_handle_by_id, [],
+        reviewers._load_deck_pages(conn, analysis_id),
+    )
+
+    assert "LIMIT.1" in prompt
+    assert "obligation_type=constraint" in prompt
+    assert "never emit a gap for a constraint" in prompt.lower()
 
 
 def _observation_input(

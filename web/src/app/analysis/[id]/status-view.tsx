@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { StageTracker } from "./stage-tracker";
+
 type AnalysisStatus = {
   id: string;
   status: "queued" | "running" | "complete" | "failed";
@@ -12,12 +14,15 @@ type AnalysisStatus = {
 
 export function CompletedStatus({ analysisId }: { analysisId: string }) {
   return (
-    <p className="text-green-700">
-      Analysis complete.{" "}
-      <a className="underline" href={`/analysis/${analysisId}/report`}>
+    <div className="space-y-3 border-t border-slate-200 pt-4">
+      <p className="text-sm font-medium text-green-700">Analysis complete.</p>
+      <a
+        href={`/analysis/${analysisId}/report`}
+        className="inline-block rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+      >
         View report
       </a>
-    </p>
+    </div>
   );
 }
 
@@ -97,23 +102,15 @@ export function StatusView({ analysisId }: { analysisId: string }) {
   }
 
   return (
-    <div className="space-y-2">
-      {pollError && <p className="text-red-600">{pollError}</p>}
-      <p>
-        Status: <span className="font-mono">{data.status}</span>
-      </p>
-      {data.stage && (
-        <p>
-          Stage: <span className="font-mono">{data.stage}</span>
-          {data.stageDetail ? ` — ${data.stageDetail}` : null}
-        </p>
-      )}
-      {data.status === "failed" && (
-        <p className="text-red-600">Failed: {data.error}</p>
-      )}
-      {data.status === "complete" && (
-        <CompletedStatus analysisId={analysisId} />
-      )}
+    <div className="space-y-4">
+      {pollError && <p className="text-sm text-red-600">{pollError}</p>}
+      <StageTracker
+        status={data.status}
+        stage={data.stage}
+        stageDetail={data.stageDetail}
+        error={data.error}
+      />
+      {data.status === "complete" && <CompletedStatus analysisId={analysisId} />}
     </div>
   );
 }

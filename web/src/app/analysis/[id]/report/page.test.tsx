@@ -23,6 +23,7 @@ const model: ReportModel = {
   deckDocumentId: null,
   sourcePages: [],
   matrix: [],
+  applicabilityGroups: [],
   reviewerGroups: [],
   disagreementNotes: [],
   summaryText: "Executive summary.",

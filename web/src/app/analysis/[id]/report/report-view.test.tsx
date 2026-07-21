@@ -31,6 +31,7 @@ const model: ReportModel = {
       rationale: "Covered on slide 3.",
     },
   ],
+  applicabilityGroups: [],
   reviewerGroups: [
     {
       reviewer: "compliance",

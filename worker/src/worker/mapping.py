@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from html import escape
+from typing import Annotated
 
 import psycopg
 from anthropic import AnthropicBedrock
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     ValidationError,
     field_validator,
     model_validator,
@@ -36,7 +39,7 @@ class ProposedMapping(BaseModel):
 
     requirement_id: str
     status: MappingStatus
-    slide_refs: list[int]
+    slide_refs: list[Annotated[int, Field(ge=1)]]
     rationale: str
 
     @field_validator("slide_refs")
@@ -174,6 +177,10 @@ def _load_deck_pages(conn: psycopg.Connection, analysis_id: str) -> list[dict]:
     ]
 
 
+def _escape_prompt_value(value: object) -> str:
+    return escape(str(value), quote=True)
+
+
 def _build_prompt(requirements: list[dict], deck_pages: list[dict]) -> str:
     sections = [
         """Map every listed solicitation obligation to the proposal deck.
@@ -191,18 +198,18 @@ summary, and aligned narration together as evidence.
     ]
     for requirement in requirements:
         sections.append(
-            f"- requirement_id: {requirement['id']}\n"
-            f"  source: {requirement['source']}\n"
-            f"  ref: {requirement['ref']}\n"
-            f"  text: {requirement['text']}"
+            f"- requirement_id: {_escape_prompt_value(requirement['id'])}\n"
+            f"  source: {_escape_prompt_value(requirement['source'])}\n"
+            f"  ref: {_escape_prompt_value(requirement['ref'])}\n"
+            f"  text: {_escape_prompt_value(requirement['text'])}"
         )
     sections.append("</requirements>\n\n<proposal_deck>")
     for page in deck_pages:
         sections.append(
-            f"page {page['page_no']}:\n"
-            f"native_text: {page['native_text']}\n"
-            f"vision_summary: {page['vision_summary']}\n"
-            f"script_text: {page['script_text']}"
+            f"page {_escape_prompt_value(page['page_no'])}:\n"
+            f"native_text: {_escape_prompt_value(page['native_text'])}\n"
+            f"vision_summary: {_escape_prompt_value(page['vision_summary'])}\n"
+            f"script_text: {_escape_prompt_value(page['script_text'])}"
         )
     sections.append("</proposal_deck>")
     return "\n\n".join(sections)

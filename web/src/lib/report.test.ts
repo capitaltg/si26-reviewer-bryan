@@ -90,6 +90,10 @@ async function createRequirement(
     ref: string;
     weight?: string | null;
     supersedesRequirementId?: string;
+    appliesTo?: "deck" | "other_component" | "administrative" | null;
+    obligationType?: "content" | "constraint" | null;
+    obligationSide?: "quoter" | "government" | null;
+    classificationRationale?: string | null;
   },
 ) {
   const [row] = await db
@@ -103,6 +107,15 @@ async function createRequirement(
       pageNo: 1,
       weight: overrides.weight ?? null,
       supersedesRequirementId: overrides.supersedesRequirementId,
+      appliesTo: overrides.appliesTo === undefined ? "deck" : overrides.appliesTo,
+      obligationType:
+        overrides.obligationType === undefined ? "content" : overrides.obligationType,
+      obligationSide:
+        overrides.obligationSide === undefined ? "quoter" : overrides.obligationSide,
+      classificationRationale:
+        overrides.classificationRationale === undefined
+          ? "test classification"
+          : overrides.classificationRationale,
     })
     .returning({ id: requirements.id });
   return row.id;
@@ -197,11 +210,13 @@ describe("loadReport", () => {
       source: "M",
       ref: "M.1",
       weight: "40%",
+      obligationSide: "government",
     });
     const light = await createRequirement(analysisId, solicitationId, {
       source: "M",
       ref: "M.2",
       weight: "10%",
+      obligationSide: "government",
     });
 
     const lowWeighted = await createGapFinding(analysisId, "compliance", {
@@ -264,6 +279,7 @@ describe("loadReport", () => {
       source: "M",
       ref: "M.1",
       weight: "10%",
+      obligationSide: "government",
     });
     const nonMFinding = await createGapFinding(analysisId, "compliance", {
       requirementId: nonM,
@@ -401,5 +417,55 @@ describe("loadReport", () => {
 
     expect(result.model.matrix.map((row) => row.ref)).toEqual(["L.1", "SOW.1"]);
     expect(result.model.matrix.every((row) => row.status !== null)).toBe(true);
+  });
+
+  it("separates mapped obligations from non-coverage classifications", async () => {
+    const userId = await createUser();
+    const analysisId = await createAnalysis(userId, "complete");
+    const solicitationId = await createSolicitation(analysisId);
+
+    const included = await createRequirement(analysisId, solicitationId, {
+      ref: "L.deck",
+    });
+    await db.insert(mappings).values({
+      requirementId: included,
+      status: "covered",
+      slideRefs: [1],
+      rationale: "Covered.",
+    });
+    await createRequirement(analysisId, solicitationId, {
+      ref: "L.other",
+      appliesTo: "other_component",
+      classificationRationale: "Written Factor 1 response",
+    });
+    await createRequirement(analysisId, solicitationId, {
+      source: "limit",
+      ref: "LIMIT.1",
+      obligationType: "constraint",
+      classificationRationale: "Deck constraint",
+    });
+    await createRequirement(analysisId, solicitationId, {
+      ref: "L.legacy",
+      appliesTo: null,
+      obligationType: null,
+      obligationSide: null,
+      classificationRationale: null,
+    });
+
+    const result = await loadReport(userId, analysisId);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    expect(result.model.matrix.map((row) => row.ref)).toEqual(["L.deck"]);
+    expect(
+      result.model.applicabilityGroups.map((group) => [
+        group.kind,
+        group.records.map((row) => row.ref),
+      ]),
+    ).toEqual([
+      ["other_component", ["L.other"]],
+      ["deck_context", ["LIMIT.1"]],
+      ["unclassified", ["L.legacy"]],
+    ]);
   });
 });

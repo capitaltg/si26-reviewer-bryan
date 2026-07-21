@@ -38,6 +38,25 @@ export type MatrixRow = {
   rationale: string | null;
 };
 
+export type ApplicabilityGroupKind =
+  | "other_component"
+  | "administrative"
+  | "deck_context"
+  | "unclassified";
+
+export type ApplicabilityRecord = {
+  requirementId: string;
+  source: string;
+  ref: string;
+  text: string;
+  classificationRationale: string | null;
+};
+
+export type ApplicabilityGroup = {
+  kind: ApplicabilityGroupKind;
+  records: ApplicabilityRecord[];
+};
+
 export type ReportFinding = {
   id: string;
   reviewer: "compliance" | "technical" | "evaluator";
@@ -70,6 +89,7 @@ export type ReportModel = {
   deckDocumentId: string | null;
   sourcePages: { documentId: string; page: number }[];
   matrix: MatrixRow[];
+  applicabilityGroups: ApplicabilityGroup[];
   reviewerGroups: ReviewerGroup[];
   disagreementNotes: DisagreementNote[];
   summaryText: string;
@@ -132,6 +152,10 @@ export async function loadReport(
       text: requirements.text,
       weight: requirements.weight,
       supersedesRequirementId: requirements.supersedesRequirementId,
+      appliesTo: requirements.appliesTo,
+      obligationType: requirements.obligationType,
+      obligationSide: requirements.obligationSide,
+      classificationRationale: requirements.classificationRationale,
     })
     .from(requirements)
     .where(eq(requirements.analysisId, analysisId));
@@ -141,6 +165,16 @@ export async function loadReport(
       .map((row) => row.supersedesRequirementId)
       .filter((id): id is string => id !== null),
   );
+  const effectiveRows = requirementRows.filter(
+    (row) => !supersededIds.has(row.id),
+  );
+
+  const isCoverageMappable = (row: (typeof requirementRows)[number]) =>
+    (row.source === "L" || row.source === "SOW") &&
+    row.appliesTo === "deck" &&
+    row.obligationType === "content" &&
+    row.obligationSide === "quoter";
+
   const requirementById = new Map(requirementRows.map((row) => [row.id, row]));
 
   function supersededRefsFor(
@@ -173,11 +207,8 @@ export async function loadReport(
     mappingRows.map((row) => [row.requirementId, row]),
   );
 
-  const matrix: MatrixRow[] = requirementRows
-    .filter(
-      (row) =>
-        !supersededIds.has(row.id) && (row.source === "L" || row.source === "SOW"),
-    )
+  const matrix: MatrixRow[] = effectiveRows
+    .filter(isCoverageMappable)
     .sort((a, b) => a.ref.localeCompare(b.ref))
     .map((row) => {
       const mapping = mappingByRequirement.get(row.id);
@@ -193,6 +224,45 @@ export async function loadReport(
         rationale: mapping?.rationale ?? null,
       };
     });
+
+  function excludedKind(
+    row: (typeof requirementRows)[number],
+  ): ApplicabilityGroupKind {
+    if (
+      row.appliesTo === null ||
+      row.obligationType === null ||
+      row.obligationSide === null ||
+      row.classificationRationale === null
+    ) {
+      return "unclassified";
+    }
+    if (row.appliesTo === "other_component") return "other_component";
+    if (row.appliesTo === "administrative") return "administrative";
+    return "deck_context";
+  }
+
+  const applicabilityOrder: ApplicabilityGroupKind[] = [
+    "other_component",
+    "administrative",
+    "deck_context",
+    "unclassified",
+  ];
+  const excludedRows = effectiveRows.filter((row) => !isCoverageMappable(row));
+  const applicabilityGroups: ApplicabilityGroup[] = applicabilityOrder
+    .map((kind) => ({
+      kind,
+      records: excludedRows
+        .filter((row) => excludedKind(row) === kind)
+        .sort((a, b) => a.ref.localeCompare(b.ref))
+        .map((row) => ({
+          requirementId: row.id,
+          source: row.source,
+          ref: row.ref,
+          text: row.text,
+          classificationRationale: row.classificationRationale,
+        })),
+    }))
+    .filter((group) => group.records.length > 0);
 
   const findingRows = await db
     .select({
@@ -258,6 +328,7 @@ export async function loadReport(
       deckDocumentId: deck?.id ?? null,
       sourcePages,
       matrix,
+      applicabilityGroups,
       reviewerGroups,
       disagreementNotes: (summary?.disagreementNotes as DisagreementNote[]) ?? [],
       summaryText: summary?.summaryText ?? "",

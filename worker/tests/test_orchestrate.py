@@ -450,6 +450,62 @@ def test_orchestrate_duplicate_handle_fails(conn, monkeypatch):
     assert _summary_count(conn, analysis_id) == 0
 
 
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        {"finding_handle": "1", "cluster_key": 1},
+        {"finding_handle": 1, "cluster_key": True},
+        {"finding_handle": 1.0, "cluster_key": 1},
+    ],
+    ids=["string-handle", "boolean-cluster", "float-handle"],
+)
+def test_orchestrate_rejects_coerced_assignment_integers(
+    conn, monkeypatch, assignment
+):
+    analysis_id = insert_analysis(conn)
+    _insert_finding(conn, analysis_id, "compliance")
+    _fake_client(
+        monkeypatch,
+        [_FakeMessage("tool_use", _orchestration_input([assignment]))],
+    )
+
+    with pytest.raises(orchestrate.OrchestrateError):
+        orchestrate.run_orchestrate(conn, analysis_id)
+
+    assert _summary_count(conn, analysis_id) == 0
+
+
+def test_orchestrate_rejects_coerced_disagreement_handles(conn, monkeypatch):
+    analysis_id = insert_analysis(conn)
+    _insert_finding(conn, analysis_id, "compliance")
+    _insert_finding(conn, analysis_id, "technical")
+    _fake_client(
+        monkeypatch,
+        [
+            _FakeMessage(
+                "tool_use",
+                _orchestration_input(
+                    cluster_assignments=[
+                        {"finding_handle": 1, "cluster_key": 1},
+                        {"finding_handle": 2, "cluster_key": 1},
+                    ],
+                    disagreement_notes=[
+                        {
+                            "finding_handles": [1, "2"],
+                            "note": "Material disagreement.",
+                        }
+                    ],
+                ),
+            )
+        ],
+    )
+
+    with pytest.raises(orchestrate.OrchestrateError):
+        orchestrate.run_orchestrate(conn, analysis_id)
+
+    assert _summary_count(conn, analysis_id) == 0
+
+
 def test_orchestrate_note_spanning_two_clusters_fails(conn, monkeypatch):
     analysis_id = insert_analysis(conn)
     f1 = _insert_finding(conn, analysis_id, "compliance")

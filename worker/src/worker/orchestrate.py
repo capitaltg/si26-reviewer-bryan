@@ -37,14 +37,14 @@ class OrchestrateError(Exception):
 
 
 class _ClusterAssignment(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     finding_handle: int = Field(ge=1)
     cluster_key: int = Field(ge=1)
 
 
 class _DisagreementNote(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     finding_handles: list[int] = Field(min_length=2)
     note: str
@@ -69,7 +69,7 @@ class _DisagreementNote(BaseModel):
 
 
 class _Orchestration(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     cluster_assignments: list[_ClusterAssignment]
     disagreement_notes: list[_DisagreementNote] = Field(

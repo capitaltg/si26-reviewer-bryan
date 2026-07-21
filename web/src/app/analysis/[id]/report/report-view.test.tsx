@@ -8,6 +8,16 @@ import { ReportView } from "./report-view";
 const model: ReportModel = {
   analysisId: "11111111-1111-1111-1111-111111111111",
   deckDocumentId: "22222222-2222-2222-2222-222222222222",
+  sourcePages: [
+    {
+      documentId: "22222222-2222-2222-2222-222222222222",
+      page: 3,
+    },
+    {
+      documentId: "55555555-5555-5555-5555-555555555555",
+      page: 2,
+    },
+  ],
   matrix: [
     {
       requirementId: "33333333-3333-3333-3333-333333333333",
@@ -121,19 +131,7 @@ describe("ReportView", () => {
   it("renders unresolved citations as static text instead of dropping them", () => {
     const unresolvedModel: ReportModel = {
       ...model,
-      deckDocumentId: null,
-      reviewerGroups: model.reviewerGroups.map((group) => ({
-        ...group,
-        findings: group.findings.map((finding) => ({
-          ...finding,
-          evidence: {
-            ...finding.evidence,
-            solicitation: finding.evidence.solicitation
-              ? { ...finding.evidence.solicitation, document_id: "" }
-              : undefined,
-          },
-        })),
-      })),
+      sourcePages: [],
     };
     const html = renderToStaticMarkup(
       <ReportView model={unresolvedModel} analysisId={model.analysisId} />,

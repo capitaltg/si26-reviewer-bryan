@@ -21,6 +21,7 @@ const analysisId = "11111111-1111-1111-1111-111111111111";
 const model: ReportModel = {
   analysisId,
   deckDocumentId: null,
+  sourcePages: [],
   matrix: [],
   reviewerGroups: [],
   disagreementNotes: [],

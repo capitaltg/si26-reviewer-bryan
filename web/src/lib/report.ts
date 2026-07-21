@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -6,6 +6,7 @@ import {
   documents,
   findings,
   mappings,
+  pages,
   requirements,
   summaries,
 } from "@/db/schema";
@@ -67,6 +68,7 @@ export type DisagreementNote = {
 export type ReportModel = {
   analysisId: string;
   deckDocumentId: string | null;
+  sourcePages: { documentId: string; page: number }[];
   matrix: MatrixRow[];
   reviewerGroups: ReviewerGroup[];
   disagreementNotes: DisagreementNote[];
@@ -104,6 +106,23 @@ export async function loadReport(
     .select({ id: documents.id })
     .from(documents)
     .where(and(eq(documents.analysisId, analysisId), eq(documents.kind, "deck")));
+
+  const sourcePages = await db
+    .select({ documentId: pages.documentId, page: pages.pageNo })
+    .from(pages)
+    .innerJoin(documents, eq(documents.id, pages.documentId))
+    .where(
+      and(
+        eq(documents.analysisId, analysisId),
+        inArray(documents.kind, [
+          "solicitation_base",
+          "solicitation_amendment",
+          "solicitation_q_and_a",
+          "solicitation_attachment",
+          "deck",
+        ]),
+      ),
+    );
 
   const requirementRows = await db
     .select({
@@ -155,7 +174,10 @@ export async function loadReport(
   );
 
   const matrix: MatrixRow[] = requirementRows
-    .filter((row) => !supersededIds.has(row.id))
+    .filter(
+      (row) =>
+        !supersededIds.has(row.id) && (row.source === "L" || row.source === "SOW"),
+    )
     .sort((a, b) => a.ref.localeCompare(b.ref))
     .map((row) => {
       const mapping = mappingByRequirement.get(row.id);
@@ -208,7 +230,7 @@ export async function loadReport(
     confidence: row.confidence,
     requirementSource: row.requirementSource,
     requirementRef: row.requirementRef,
-    weight: row.weight,
+    weight: row.requirementSource === "M" ? row.weight : null,
     description: row.description,
     suggestion: row.suggestion,
     evidence: (row.evidence as FindingEvidence) ?? {},
@@ -234,6 +256,7 @@ export async function loadReport(
     model: {
       analysisId,
       deckDocumentId: deck?.id ?? null,
+      sourcePages,
       matrix,
       reviewerGroups,
       disagreementNotes: (summary?.disagreementNotes as DisagreementNote[]) ?? [],

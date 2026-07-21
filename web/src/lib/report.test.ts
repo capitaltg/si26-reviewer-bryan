@@ -8,6 +8,7 @@ import {
   documents,
   findings,
   mappings,
+  pages,
   requirements,
   summaries,
   users,
@@ -71,11 +72,21 @@ async function createDeck(analysisId: string) {
   return document.id;
 }
 
+async function createPage(documentId: string, pageNo: number) {
+  await db.insert(pages).values({
+    documentId,
+    pageNo,
+    text: `page ${pageNo}`,
+    imageBlobPathname: `pages/${documentId}/${pageNo}.png`,
+    imageBlobUrl: `https://blob.example/pages/${documentId}/${pageNo}.png`,
+  });
+}
+
 async function createRequirement(
   analysisId: string,
   sourceDocumentId: string,
   overrides: {
-    source?: "L" | "M" | "SOW";
+    source?: "L" | "M" | "SOW" | "limit" | "FAR" | "amendment";
     ref: string;
     weight?: string | null;
     supersedesRequirementId?: string;
@@ -151,6 +162,31 @@ describe("loadReport", () => {
     expect(await loadReport(userId, analysisId)).toEqual({ kind: "not_complete" });
   });
 
+  it("loads the existing source pages that citations may resolve to", async () => {
+    const userId = await createUser();
+    const analysisId = await createAnalysis(userId, "complete");
+    const solicitationId = await createSolicitation(analysisId);
+    const deckId = await createDeck(analysisId);
+    await createPage(solicitationId, 2);
+    await createPage(deckId, 3);
+
+    const otherAnalysisId = await createAnalysis(userId, "complete");
+    const otherDeckId = await createDeck(otherAnalysisId);
+    await createPage(otherDeckId, 99);
+
+    const result = await loadReport(userId, analysisId);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    expect(result.model.sourcePages).toHaveLength(2);
+    expect(result.model.sourcePages).toEqual(
+      expect.arrayContaining([
+        { documentId: solicitationId, page: 2 },
+        { documentId: deckId, page: 3 },
+      ]),
+    );
+  });
+
   it("includes only verified findings, grouped by reviewer and priority-ordered", async () => {
     const userId = await createUser();
     const analysisId = await createAnalysis(userId, "complete");
@@ -212,6 +248,44 @@ describe("loadReport", () => {
     expect(allIds).toHaveLength(3);
     expect(allIds).not.toContain(unverified);
     expect(result.model.reviewerGroups.map((g) => g.reviewer)).toContain("technical");
+  });
+
+  it("uses numeric weights for Section M findings only", async () => {
+    const userId = await createUser();
+    const analysisId = await createAnalysis(userId, "complete");
+    const solicitationId = await createSolicitation(analysisId);
+
+    const nonM = await createRequirement(analysisId, solicitationId, {
+      source: "L",
+      ref: "L.1",
+      weight: "99%",
+    });
+    const sectionM = await createRequirement(analysisId, solicitationId, {
+      source: "M",
+      ref: "M.1",
+      weight: "10%",
+    });
+    const nonMFinding = await createGapFinding(analysisId, "compliance", {
+      requirementId: nonM,
+      severity: "high",
+    });
+    const sectionMFinding = await createGapFinding(analysisId, "compliance", {
+      requirementId: sectionM,
+      severity: "low",
+    });
+
+    const result = await loadReport(userId, analysisId);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    const compliance = result.model.reviewerGroups.find(
+      (group) => group.reviewer === "compliance",
+    );
+    expect(compliance?.findings.map((finding) => finding.id)).toEqual([
+      sectionMFinding,
+      nonMFinding,
+    ]);
+    expect(compliance?.findings.find((finding) => finding.id === nonMFinding)?.weight).toBeNull();
   });
 
   it("does not expose requirement metadata through a cross-analysis finding link", async () => {
@@ -283,5 +357,49 @@ describe("loadReport", () => {
     expect(result.model.matrix[0].supersededRefs).toEqual(["L.1"]);
     expect(result.model.matrix[0].status).toBe("covered");
     expect(result.model.matrix[0].slideRefs).toEqual([3]);
+  });
+
+  it("excludes requirement categories that are not coverage-mapped", async () => {
+    const userId = await createUser();
+    const analysisId = await createAnalysis(userId, "complete");
+    const solicitationId = await createSolicitation(analysisId);
+
+    const lRequirement = await createRequirement(analysisId, solicitationId, {
+      source: "L",
+      ref: "L.1",
+    });
+    const sowRequirement = await createRequirement(analysisId, solicitationId, {
+      source: "SOW",
+      ref: "SOW.1",
+    });
+    for (const [source, ref] of [
+      ["M", "M.1"],
+      ["limit", "LIMIT.1"],
+      ["FAR", "FAR.1"],
+      ["amendment", "AMD.1"],
+    ] as const) {
+      await createRequirement(analysisId, solicitationId, { source, ref });
+    }
+    await db.insert(mappings).values([
+      {
+        requirementId: lRequirement,
+        status: "covered",
+        slideRefs: [1],
+        rationale: "Covered.",
+      },
+      {
+        requirementId: sowRequirement,
+        status: "partial",
+        slideRefs: [2],
+        rationale: "Partially covered.",
+      },
+    ]);
+
+    const result = await loadReport(userId, analysisId);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    expect(result.model.matrix.map((row) => row.ref)).toEqual(["L.1", "SOW.1"]);
+    expect(result.model.matrix.every((row) => row.status !== null)).toBe(true);
   });
 });

@@ -67,6 +67,11 @@ export function ReportView({
   const [active, setActive] = useState<Citation | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sourcePageKeys = new Set(
+    model.sourcePages.map(({ documentId, page }) => `${documentId}:${page}`),
+  );
+  const hasSourcePage = (documentId: string, page: number) =>
+    sourcePageKeys.has(`${documentId}:${page}`);
 
   const openCitation = (citation: Citation) => {
     setImageUrl(null);
@@ -123,7 +128,12 @@ export function ReportView({
 
   const solicitationCitation = (finding: ReportFinding): Citation | null => {
     const solicitation = finding.evidence.solicitation;
-    if (!solicitation?.document_id) return null;
+    if (
+      !solicitation?.document_id ||
+      !hasSourcePage(solicitation.document_id, solicitation.page)
+    ) {
+      return null;
+    }
     return {
       documentId: solicitation.document_id,
       page: solicitation.page,
@@ -133,7 +143,13 @@ export function ReportView({
 
   const proposalCitation = (finding: ReportFinding): Citation | null => {
     const proposal = finding.evidence.proposal;
-    if (!proposal || !model.deckDocumentId) return null;
+    if (
+      !proposal ||
+      !model.deckDocumentId ||
+      !hasSourcePage(model.deckDocumentId, proposal.slide)
+    ) {
+      return null;
+    }
     return {
       documentId: model.deckDocumentId,
       page: proposal.slide,
@@ -142,7 +158,9 @@ export function ReportView({
   };
 
   const slideCitation = (slide: number): Citation | null => {
-    if (!model.deckDocumentId) return null;
+    if (!model.deckDocumentId || !hasSourcePage(model.deckDocumentId, slide)) {
+      return null;
+    }
     return { documentId: model.deckDocumentId, page: slide, label: `Slide ${slide}` };
   };
 

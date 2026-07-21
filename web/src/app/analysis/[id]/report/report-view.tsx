@@ -16,6 +16,12 @@ const SEVERITY_CLASS: Record<ReportFinding["severity"], string> = {
   low: "bg-slate-100 text-slate-700",
 };
 
+const COVERAGE_CLASS: Record<string, string> = {
+  covered: "bg-green-100 text-green-800",
+  partial: "bg-amber-100 text-amber-800",
+  missing: "bg-red-100 text-red-800",
+};
+
 const REVIEWER_LABEL: Record<ReviewerGroup["reviewer"], string> = {
   compliance: "Compliance",
   technical: "Technical",
@@ -27,6 +33,21 @@ function Chip({ className, children }: { className: string; children: React.Reac
     <span className={`rounded px-2 py-0.5 text-xs font-medium ${className}`}>
       {children}
     </span>
+  );
+}
+
+function SectionCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 className="mb-3 text-lg font-semibold">{title}</h2>
+      {children}
+    </section>
   );
 }
 
@@ -79,8 +100,13 @@ export function ReportView({
     setActive(citation);
   };
 
+  const allFindings = model.reviewerGroups.flatMap((group) => group.findings);
+  const severityCounts = { high: 0, medium: 0, low: 0 };
+  for (const finding of allFindings) {
+    severityCounts[finding.severity] += 1;
+  }
   const clusterCounts = new Map<string, number>();
-  for (const finding of model.reviewerGroups.flatMap((group) => group.findings)) {
+  for (const finding of allFindings) {
     if (finding.clusterId) {
       clusterCounts.set(
         finding.clusterId,
@@ -165,31 +191,50 @@ export function ReportView({
   };
 
   return (
-    <div className="space-y-10">
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">Executive summary</h2>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{model.summaryText}</p>
+    <div className="space-y-6">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {(["high", "medium", "low"] as const).map((severity) => (
+          <div
+            key={severity}
+            data-severity={severity}
+            data-count={severityCounts[severity]}
+            className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+          >
+            <div className="text-2xl font-semibold">
+              {severityCounts[severity]}
+            </div>
+            <Chip className={`mt-1 ${SEVERITY_CLASS[severity]}`}>
+              {severity} severity
+            </Chip>
+          </div>
+        ))}
       </section>
 
+      <SectionCard title="Executive summary">
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">
+          {model.summaryText}
+        </p>
+      </SectionCard>
+
       {model.disagreementNotes.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-lg font-semibold">Reviewer disagreements</h2>
+        <SectionCard title="Reviewer disagreements">
           <ul className="space-y-2">
             {model.disagreementNotes.map((note, index) => (
               <li
                 key={index}
                 className="rounded border border-amber-300 bg-amber-50 p-3 text-sm"
               >
-                <span className="font-medium">{note.reviewers.join(" vs ")}: </span>
+                <span className="font-medium">
+                  {note.reviewers.join(" vs ")}: {" "}
+                </span>
                 {note.note}
               </li>
             ))}
           </ul>
-        </section>
+        </SectionCard>
       )}
 
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">Traceability matrix</h2>
+      <SectionCard title="Traceability matrix">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
@@ -202,7 +247,10 @@ export function ReportView({
             </thead>
             <tbody>
               {model.matrix.map((row) => (
-                <tr key={row.requirementId} className="border-b align-top">
+                <tr
+                  key={row.requirementId}
+                  className="border-b align-top odd:bg-slate-50"
+                >
                   <td className="py-2 pr-4 font-mono">
                     {row.source} {row.ref}
                     {row.weight ? ` (${row.weight})` : ""}
@@ -215,7 +263,20 @@ export function ReportView({
                       </span>
                     )}
                   </td>
-                  <td className="py-2 pr-4">{row.status ?? "—"}</td>
+                  <td className="py-2 pr-4">
+                    {row.status ? (
+                      <Chip
+                        className={
+                          COVERAGE_CLASS[row.status] ??
+                          "bg-slate-100 text-slate-700"
+                        }
+                      >
+                        {row.status}
+                      </Chip>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="py-2 pr-4">
                     <div className="flex flex-wrap gap-1">
                       {row.slideRefs.length === 0
@@ -236,75 +297,80 @@ export function ReportView({
             </tbody>
           </table>
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="space-y-6">
-        <h2 className="text-lg font-semibold">Findings</h2>
-        {model.reviewerGroups.map((group) => (
-          <div key={group.reviewer}>
-            <h3 className="mb-2 font-medium">{REVIEWER_LABEL[group.reviewer]}</h3>
-            <ul className="space-y-3">
-              {group.findings.map((finding) => {
-                const clusterLabel = finding.clusterId
-                  ? clusterLabelById.get(finding.clusterId)
-                  : undefined;
-                return (
-                  <li
-                    key={finding.id}
-                    className={`rounded border p-3 text-sm ${
-                      clusterLabel ? "border-l-4 border-l-blue-500 bg-blue-50/30" : ""
-                    }`}
-                    data-cluster-id={finding.clusterId ?? undefined}
-                  >
-                    <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <Chip className={SEVERITY_CLASS[finding.severity]}>
-                        {finding.severity}
-                      </Chip>
-                      <Chip className="bg-slate-100 text-slate-700">
-                        confidence: {finding.confidence}
-                      </Chip>
-                      {finding.evidenceProvenance === "vision_summary" && (
-                        <Chip className="bg-purple-100 text-purple-800">
-                          grounded in vision summary
+      <SectionCard title="Findings">
+        <div className="space-y-6">
+          {model.reviewerGroups.map((group) => (
+            <div key={group.reviewer}>
+              <h3 className="mb-2 font-medium">
+                {REVIEWER_LABEL[group.reviewer]}
+              </h3>
+              <ul className="space-y-3">
+                {group.findings.map((finding) => {
+                  const clusterLabel = finding.clusterId
+                    ? clusterLabelById.get(finding.clusterId)
+                    : undefined;
+                  return (
+                    <li
+                      key={finding.id}
+                      className={`rounded border p-3 text-sm ${
+                        clusterLabel
+                          ? "border-l-4 border-l-blue-500 bg-blue-50/30"
+                          : ""
+                      }`}
+                      data-cluster-id={finding.clusterId ?? undefined}
+                    >
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <Chip className={SEVERITY_CLASS[finding.severity]}>
+                          {finding.severity}
                         </Chip>
-                      )}
-                      {clusterLabel && (
-                        <Chip className="bg-blue-100 text-blue-800">
-                          {clusterLabel}
+                        <Chip className="bg-slate-100 text-slate-700">
+                          confidence: {finding.confidence}
                         </Chip>
-                      )}
-                    </div>
-                    <p className="mb-1">{finding.description}</p>
-                    <p className="mb-2 text-slate-600">
-                      Suggestion: {finding.suggestion}
-                    </p>
-                    <div className="flex flex-wrap gap-1">
-                      <CitationButton
-                        citation={solicitationCitation(finding)}
-                        fallbackLabel={
-                          finding.evidence.solicitation
-                            ? `${finding.evidence.solicitation.ref} p.${finding.evidence.solicitation.page}`
-                            : undefined
-                        }
-                        onOpen={openCitation}
-                      />
-                      <CitationButton
-                        citation={proposalCitation(finding)}
-                        fallbackLabel={
-                          finding.evidence.proposal
-                            ? `Slide ${finding.evidence.proposal.slide}`
-                            : undefined
-                        }
-                        onOpen={openCitation}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </section>
+                        {finding.evidenceProvenance === "vision_summary" && (
+                          <Chip className="bg-purple-100 text-purple-800">
+                            grounded in vision summary
+                          </Chip>
+                        )}
+                        {clusterLabel && (
+                          <Chip className="bg-blue-100 text-blue-800">
+                            {clusterLabel}
+                          </Chip>
+                        )}
+                      </div>
+                      <p className="mb-1">{finding.description}</p>
+                      <p className="mb-2 text-slate-600">
+                        Suggestion: {finding.suggestion}
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        <CitationButton
+                          citation={solicitationCitation(finding)}
+                          fallbackLabel={
+                            finding.evidence.solicitation
+                              ? `${finding.evidence.solicitation.ref} p.${finding.evidence.solicitation.page}`
+                              : undefined
+                          }
+                          onOpen={openCitation}
+                        />
+                        <CitationButton
+                          citation={proposalCitation(finding)}
+                          fallbackLabel={
+                            finding.evidence.proposal
+                              ? `Slide ${finding.evidence.proposal.slide}`
+                              : undefined
+                          }
+                          onOpen={openCitation}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
 
       {active && (
         <div
@@ -312,7 +378,7 @@ export function ReportView({
           onClick={() => setActive(null)}
         >
           <div
-            className="max-h-full max-w-3xl overflow-auto rounded bg-white p-4"
+            className="max-h-full w-full max-w-4xl overflow-auto rounded-lg bg-white p-4 shadow-xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-2 flex items-center justify-between">
@@ -320,7 +386,7 @@ export function ReportView({
               <button
                 type="button"
                 onClick={() => setActive(null)}
-                className="text-sm text-slate-500 hover:text-slate-800"
+                className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
               >
                 Close
               </button>

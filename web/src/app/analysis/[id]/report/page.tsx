@@ -19,7 +19,7 @@ export default async function ReportPage({
   if (result.kind === "not_complete") redirect(`/analysis/${id}`);
 
   return (
-    <main className="mx-auto max-w-5xl p-8">
+    <main className="mx-auto w-full max-w-5xl flex-1 p-8">
       <h1 className="mb-6 text-xl font-semibold">Analysis report</h1>
       <ReportView model={result.model} analysisId={id} />
     </main>

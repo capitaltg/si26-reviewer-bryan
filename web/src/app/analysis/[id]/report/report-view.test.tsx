@@ -141,4 +141,22 @@ describe("ReportView", () => {
     expect(html).toContain("Slide 3");
     expect(html).not.toContain("<button");
   });
+
+  it("summarizes finding counts by severity", () => {
+    const html = renderToStaticMarkup(
+      <ReportView model={model} analysisId={model.analysisId} />,
+    );
+
+    expect(html).toContain('data-severity="high" data-count="1"');
+    expect(html).toContain('data-severity="medium" data-count="1"');
+    expect(html).toContain('data-severity="low" data-count="0"');
+  });
+
+  it("renders coverage status as a labeled chip", () => {
+    const html = renderToStaticMarkup(
+      <ReportView model={model} analysisId={model.analysisId} />,
+    );
+
+    expect(html).toContain(">covered</span>");
+  });
 });

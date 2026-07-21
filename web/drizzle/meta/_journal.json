@@ -43,6 +43,13 @@
       "when": 1784642382158,
       "tag": "0005_cuddly_hercules",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784664150647,
+      "tag": "0006_polite_vulcan",
+      "breakpoints": true
     }
   ]
 }

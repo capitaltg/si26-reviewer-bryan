@@ -44,6 +44,22 @@ export const mappingStatusEnum = pgEnum("mapping_status", [
   "missing",
 ]);
 
+export const requirementAppliesToEnum = pgEnum("requirement_applies_to", [
+  "deck",
+  "other_component",
+  "administrative",
+]);
+
+export const requirementObligationTypeEnum = pgEnum(
+  "requirement_obligation_type",
+  ["content", "constraint"],
+);
+
+export const requirementObligationSideEnum = pgEnum(
+  "requirement_obligation_side",
+  ["quoter", "government"],
+);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   keycloakSub: text("keycloak_sub").notNull().unique(),
@@ -125,23 +141,47 @@ export const pages = pgTable(
   ],
 );
 
-export const requirements = pgTable("requirements", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  analysisId: uuid("analysis_id")
-    .notNull()
-    .references(() => analyses.id, { onDelete: "cascade" }),
-  sourceDocumentId: uuid("source_document_id")
-    .notNull()
-    .references(() => documents.id, { onDelete: "cascade" }),
-  source: requirementSourceEnum("source").notNull(),
-  ref: text("ref").notNull(),
-  text: text("text").notNull(),
-  pageNo: integer("page_no").notNull(),
-  weight: text("weight"),
-  supersedesRequirementId: uuid("supersedes_requirement_id").references(
-    (): AnyPgColumn => requirements.id,
-  ),
-});
+export const requirements = pgTable(
+  "requirements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    analysisId: uuid("analysis_id")
+      .notNull()
+      .references(() => analyses.id, { onDelete: "cascade" }),
+    sourceDocumentId: uuid("source_document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    source: requirementSourceEnum("source").notNull(),
+    ref: text("ref").notNull(),
+    text: text("text").notNull(),
+    pageNo: integer("page_no").notNull(),
+    appliesTo: requirementAppliesToEnum("applies_to"),
+    obligationType: requirementObligationTypeEnum("obligation_type"),
+    obligationSide: requirementObligationSideEnum("obligation_side"),
+    classificationRationale: text("classification_rationale"),
+    weight: text("weight"),
+    supersedesRequirementId: uuid("supersedes_requirement_id").references(
+      (): AnyPgColumn => requirements.id,
+    ),
+  },
+  (table) => [
+    check(
+      "requirements_classification_all_null_or_complete",
+      sql`(
+        (${table.appliesTo} IS NULL
+          AND ${table.obligationType} IS NULL
+          AND ${table.obligationSide} IS NULL
+          AND ${table.classificationRationale} IS NULL)
+        OR
+        (${table.appliesTo} IS NOT NULL
+          AND ${table.obligationType} IS NOT NULL
+          AND ${table.obligationSide} IS NOT NULL
+          AND ${table.classificationRationale} IS NOT NULL
+          AND char_length(btrim(${table.classificationRationale})) > 0)
+      )`,
+    ),
+  ],
+);
 
 export const mappings = pgTable("mappings", {
   id: uuid("id").primaryKey().defaultRandom(),

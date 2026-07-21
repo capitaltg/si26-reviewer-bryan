@@ -1,0 +1,146 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import type { ReportModel } from "@/lib/report";
+
+import { ReportView } from "./report-view";
+
+const model: ReportModel = {
+  analysisId: "11111111-1111-1111-1111-111111111111",
+  deckDocumentId: "22222222-2222-2222-2222-222222222222",
+  matrix: [
+    {
+      requirementId: "33333333-3333-3333-3333-333333333333",
+      source: "L",
+      ref: "L.1",
+      text: "Provide the technical approach.",
+      weight: "40%",
+      supersededRefs: ["L.0"],
+      status: "covered",
+      slideRefs: [3],
+      rationale: "Covered on slide 3.",
+    },
+  ],
+  reviewerGroups: [
+    {
+      reviewer: "compliance",
+      findings: [
+        {
+          id: "44444444-4444-4444-4444-444444444444",
+          reviewer: "compliance",
+          findingKind: "observation",
+          severity: "high",
+          confidence: "medium",
+          requirementSource: "L",
+          requirementRef: "L.1",
+          weight: "40%",
+          description: "The approach is addressed on the timeline slide.",
+          suggestion: "Keep it explicit.",
+          evidence: {
+            solicitation: {
+              document_id: "55555555-5555-5555-5555-555555555555",
+              document_name: "base.pdf",
+              ref: "L.1",
+              page: 2,
+              quote: "Provide the technical approach.",
+            },
+            proposal: { slide: 3, quote: "phased rollout" },
+          },
+          evidenceProvenance: "vision_summary",
+          clusterId: "66666666-6666-6666-6666-666666666666",
+        },
+      ],
+    },
+    {
+      reviewer: "technical",
+      findings: [
+        {
+          id: "77777777-7777-7777-7777-777777777777",
+          reviewer: "technical",
+          findingKind: "gap",
+          severity: "medium",
+          confidence: "high",
+          requirementSource: "L",
+          requirementRef: "L.1",
+          weight: "40%",
+          description: "The implementation detail is incomplete.",
+          suggestion: "Add the missing implementation detail.",
+          evidence: {
+            solicitation: {
+              document_id: "55555555-5555-5555-5555-555555555555",
+              document_name: "base.pdf",
+              ref: "L.1",
+              page: 2,
+              quote: "Provide the technical approach.",
+            },
+            searched_scope: "searched all slides",
+          },
+          evidenceProvenance: null,
+          clusterId: "66666666-6666-6666-6666-666666666666",
+        },
+      ],
+    },
+  ],
+  disagreementNotes: [
+    {
+      finding_ids: [
+        "44444444-4444-4444-4444-444444444444",
+        "77777777-7777-7777-7777-777777777777",
+      ],
+      reviewers: ["compliance", "technical"],
+      note: "Compliance and technical disagree on severity.",
+    },
+  ],
+  summaryText: "The deck broadly addresses the solicitation.",
+};
+
+describe("ReportView", () => {
+  it("renders the summary, matrix, findings, and disagreement notes", () => {
+    const html = renderToStaticMarkup(
+      <ReportView model={model} analysisId={model.analysisId} />,
+    );
+    expect(html).toContain("The deck broadly addresses the solicitation.");
+    expect(html).toContain("L.1");
+    expect(html).toContain("Provide the technical approach.");
+    expect(html).toContain("The approach is addressed on the timeline slide.");
+    expect(html).toContain("Compliance and technical disagree on severity.");
+    expect(html).toContain("Supersedes L.0");
+    // The vision-only provenance badge is present.
+    expect(html.toLowerCase()).toContain("vision");
+    expect(html.match(/Related finding group 1/g)).toHaveLength(2);
+  });
+
+  it("renders a resolvable proposal citation as an interactive control", () => {
+    const html = renderToStaticMarkup(
+      <ReportView model={model} analysisId={model.analysisId} />,
+    );
+    expect(html).toContain("<button");
+    expect(html).toContain("Slide 3");
+  });
+
+  it("renders unresolved citations as static text instead of dropping them", () => {
+    const unresolvedModel: ReportModel = {
+      ...model,
+      deckDocumentId: null,
+      reviewerGroups: model.reviewerGroups.map((group) => ({
+        ...group,
+        findings: group.findings.map((finding) => ({
+          ...finding,
+          evidence: {
+            ...finding.evidence,
+            solicitation: finding.evidence.solicitation
+              ? { ...finding.evidence.solicitation, document_id: "" }
+              : undefined,
+          },
+        })),
+      })),
+    };
+    const html = renderToStaticMarkup(
+      <ReportView model={unresolvedModel} analysisId={model.analysisId} />,
+    );
+
+    expect(html).toContain("L.1 p.2");
+    expect(html).toContain("Slide 3");
+    expect(html).not.toContain("<button");
+  });
+});

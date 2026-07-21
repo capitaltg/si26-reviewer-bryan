@@ -10,6 +10,17 @@ type AnalysisStatus = {
   error: string | null;
 };
 
+export function CompletedStatus({ analysisId }: { analysisId: string }) {
+  return (
+    <p className="text-green-700">
+      Analysis complete.{" "}
+      <a className="underline" href={`/analysis/${analysisId}/report`}>
+        View report
+      </a>
+    </p>
+  );
+}
+
 export function StatusView({ analysisId }: { analysisId: string }) {
   const [data, setData] = useState<AnalysisStatus | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -101,9 +112,7 @@ export function StatusView({ analysisId }: { analysisId: string }) {
         <p className="text-red-600">Failed: {data.error}</p>
       )}
       {data.status === "complete" && (
-        <p className="text-green-700">
-          Analysis complete. (Report screen arrives in Phase 5.)
-        </p>
+        <CompletedStatus analysisId={analysisId} />
       )}
     </div>
   );

@@ -223,3 +223,31 @@ export const findings = pgTable(
     ),
   ],
 );
+
+export const summaries = pgTable(
+  "summaries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    analysisId: uuid("analysis_id")
+      .notNull()
+      .unique()
+      .references(() => analyses.id, { onDelete: "cascade" }),
+    summaryText: text("summary_text").notNull(),
+    disagreementNotes: jsonb("disagreement_notes")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "summaries_summary_not_empty",
+      sql`char_length(btrim(${table.summaryText})) > 0`,
+    ),
+    check(
+      "summaries_notes_is_array",
+      sql`jsonb_typeof(${table.disagreementNotes}) = 'array'`,
+    ),
+  ],
+);

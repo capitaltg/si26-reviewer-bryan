@@ -36,6 +36,13 @@
       "when": 1784574210000,
       "tag": "0004_famous_silver_surfer",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784642382158,
+      "tag": "0005_cuddly_hercules",
+      "breakpoints": true
     }
   ]
 }

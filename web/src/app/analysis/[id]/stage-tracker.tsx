@@ -33,7 +33,7 @@ export function StageTracker({
       ? PIPELINE_STAGES.length
       : status === "queued" || stage === "claimed" || stage === null
         ? -1
-        : stage === "done"
+        : status !== "failed" && stage === "done"
           ? PIPELINE_STAGES.length
           : PIPELINE_STAGES.findIndex((step) => step.key === stage);
   const unanchoredFailure = status === "failed" && currentIndex === -1;

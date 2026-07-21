@@ -110,4 +110,28 @@ describe("StageTracker", () => {
     ]);
     expect(html).toContain("worker timed out before ingest");
   });
+
+  it("never hides the error when a failed job carries a terminal 'done' stage", () => {
+    const html = renderToStaticMarkup(
+      <StageTracker
+        status="failed"
+        stage="done"
+        stageDetail={null}
+        error="orchestrate crashed after the last stage reported done"
+      />,
+    );
+
+    expect(states(html)).toEqual([
+      "pending",
+      "pending",
+      "pending",
+      "pending",
+      "pending",
+      "pending",
+      "pending",
+    ]);
+    expect(html).toContain(
+      "orchestrate crashed after the last stage reported done",
+    );
+  });
 });

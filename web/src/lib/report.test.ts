@@ -451,7 +451,6 @@ describe("loadReport", () => {
       obligationSide: null,
       classificationRationale: null,
     });
-
     const result = await loadReport(userId, analysisId);
     expect(result.kind).toBe("ok");
     if (result.kind !== "ok") return;
@@ -467,5 +466,45 @@ describe("loadReport", () => {
       ["deck_context", ["LIMIT.1"]],
       ["unclassified", ["L.legacy"]],
     ]);
+
+  });
+
+  it("sorts duplicate applicability refs by source and requirement id", async () => {
+    const userId = await createUser();
+    const analysisId = await createAnalysis(userId, "complete");
+    const solicitationId = await createSolicitation(analysisId);
+
+    const sowDuplicate = await createRequirement(analysisId, solicitationId, {
+      source: "SOW",
+      ref: "DUP.1",
+      appliesTo: "other_component",
+    });
+    const lDuplicate = await createRequirement(analysisId, solicitationId, {
+      source: "L",
+      ref: "DUP.1",
+      appliesTo: "other_component",
+    });
+    const laterLDuplicate = await createRequirement(analysisId, solicitationId, {
+      source: "L",
+      ref: "DUP.1",
+      appliesTo: "other_component",
+    });
+
+    const result = await loadReport(userId, analysisId);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    const duplicateGroup = result.model.applicabilityGroups.find(
+      (group) => group.kind === "other_component",
+    );
+    expect(
+      duplicateGroup?.records.map((record) => [record.source, record.requirementId]),
+    ).toEqual([
+      ["L", lDuplicate],
+      ["L", laterLDuplicate],
+      ["SOW", sowDuplicate],
+    ].sort(([sourceA, idA], [sourceB, idB]) =>
+      sourceA.localeCompare(sourceB) || idA.localeCompare(idB),
+    ));
   });
 });

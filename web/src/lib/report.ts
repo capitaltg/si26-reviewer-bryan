@@ -253,7 +253,12 @@ export async function loadReport(
       kind,
       records: excludedRows
         .filter((row) => excludedKind(row) === kind)
-        .sort((a, b) => a.ref.localeCompare(b.ref))
+        .sort(
+          (a, b) =>
+            a.ref.localeCompare(b.ref) ||
+            a.source.localeCompare(b.source) ||
+            a.id.localeCompare(b.id),
+        )
         .map((row) => ({
           requirementId: row.id,
           source: row.source,

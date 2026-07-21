@@ -126,6 +126,11 @@ def test_run_pipeline_orders_review_after_mapping(
         lambda conn_, analysis_id_: events.append(("review_work", None)),
     )
     monkeypatch.setattr(
+        pipeline.orchestrate,
+        "run_orchestrate",
+        lambda conn_, analysis_id_: events.append(("orchestrate_work", None)),
+    )
+    monkeypatch.setattr(
         pipeline.jobs,
         "update_stage",
         lambda conn_, analysis_id_, stage, detail=None: events.append((stage, detail)),
@@ -140,7 +145,7 @@ def test_run_pipeline_orders_review_after_mapping(
         "extract",
         "map",
         "review",
-        "report",
+        "orchestrate",
     }
     stages = [event for event, _ in events if event in stage_names]
     assert list(dict.fromkeys(stages)) == [
@@ -150,13 +155,13 @@ def test_run_pipeline_orders_review_after_mapping(
         "extract",
         "map",
         "review",
-        "report",
+        "orchestrate",
     ]
 
     assert [
         (event, detail)
         for event, detail in events
-        if event in {"extract", "map", "review"}
+        if event in {"extract", "map", "review", "orchestrate"}
     ] == [
         ("extract", "extracting solicitation requirements"),
         ("map", "mapping requirements to proposal content"),
@@ -164,6 +169,7 @@ def test_run_pipeline_orders_review_after_mapping(
             "review",
             "running compliance / technical / evaluator reviewers",
         ),
+        ("orchestrate", "deduplicating findings and assembling report"),
     ]
 
     def assert_updates_precede_work(stage, work):
@@ -185,11 +191,13 @@ def test_run_pipeline_orders_review_after_mapping(
     assert_updates_precede_work("extract", "extract_work")
     assert_updates_precede_work("map", "map_work")
     assert_updates_precede_work("review", "review_work")
+    assert_updates_precede_work("orchestrate", "orchestrate_work")
 
     work_events = [event for event, _ in events if event.endswith("_work")]
     assert work_events.index("extract_work") < work_events.index("map_work")
     assert work_events.index("map_work") < work_events.index("review_work")
-    assert pipeline.STUB_STAGES == [("report", "assembling report (stub)")]
+    assert work_events.index("review_work") < work_events.index("orchestrate_work")
+    assert pipeline.STUB_STAGES == []
 
 
 def _insert_document(
@@ -228,6 +236,9 @@ def test_run_pipeline_ingests_and_vision_enriches_only_deck_pages(conn, monkeypa
     )
     monkeypatch.setattr(
         pipeline.reviewers, "run_review", lambda conn_, analysis_id_: None
+    )
+    monkeypatch.setattr(
+        pipeline.orchestrate, "run_orchestrate", lambda conn_, analysis_id_: None
     )
     analysis_id = insert_analysis(conn)
 
@@ -336,7 +347,7 @@ def test_run_pipeline_skips_script_align_stage_when_no_script_document(
     # `recorded` list (e.g. from a broken monkeypatch) can't pass vacuously.
     assert "vision" in stages_seen
     assert "review" not in stages_seen
-    assert "report" in stages_seen
+    assert "orchestrate" not in stages_seen
     assert extract_calls == []
     assert mapping_calls == []
     assert review_calls == []

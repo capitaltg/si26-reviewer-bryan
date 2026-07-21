@@ -1,24 +1,23 @@
 """Pipeline stages: ingest -> vision -> script_align (optional) -> extract
--> map -> review -> report (stub).
+-> map -> review -> orchestrate.
 
-The ingest, vision, script_align, extract, map, and review stages perform real
-work; report stays a stub sleep until its own phase lands. The signature and
-the update_stage/complete/fail contract stay the same as the Phase 1 stub.
+The ingest, vision, script_align, extract, map, review, and orchestrate stages
+all perform real work; after Phase 5 there are no stub stages left. The
+signature and the update_stage/complete/fail contract stay the same as the
+Phase 1 stub.
 """
 
 import time
 
 import psycopg
 
-from . import extract, ingest, jobs, mapping, reviewers, script_align, vision
+from . import extract, ingest, jobs, mapping, orchestrate, reviewers, script_align, vision
 
 STAGE_SLEEP_SECONDS = 2
 
-# Stub stages only -- real stages are driven directly by run_pipeline below
-# rather than this list.
-STUB_STAGES = [
-    ("report", "assembling report (stub)"),
-]
+# No stub stages remain -- every pipeline stage now performs real work. The
+# empty list keeps the trailing drive loop (and its contract) in place.
+STUB_STAGES: list[tuple[str, str]] = []
 
 
 def run_pipeline(conn: psycopg.Connection, analysis_id: str) -> None:
@@ -48,6 +47,10 @@ def run_pipeline(conn: psycopg.Connection, analysis_id: str) -> None:
             conn, analysis_id, "review", "running compliance / technical / evaluator reviewers"
         )
         reviewers.run_review(conn, analysis_id)
+        jobs.update_stage(
+            conn, analysis_id, "orchestrate", "deduplicating findings and assembling report"
+        )
+        orchestrate.run_orchestrate(conn, analysis_id)
 
     for stage, detail in STUB_STAGES:
         jobs.update_stage(conn, analysis_id, stage, detail)

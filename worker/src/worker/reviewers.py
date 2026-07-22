@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import StrEnum
+from html import escape
 
 import psycopg
 from anthropic import AnthropicBedrock
@@ -220,6 +221,10 @@ SHARED_INSTRUCTIONS = (
 )
 
 
+def _escape_prompt_value(value: object) -> str:
+    return escape(str(value), quote=True)
+
+
 def _get_client() -> AnthropicBedrock:
     """Construct the Bedrock client lazily so tests can replace it."""
 
@@ -380,23 +385,29 @@ def _assign_handles(primary: list[_ResolvedReq]):
 
 
 def _build_prompt(spec, req_by_handle, doc_by_handle, doc_handle_by_id, matrix, deck_pages) -> str:
-    lines = [spec.preamble, SHARED_INSTRUCTIONS, "Solicitation documents:"]
+    lines = [
+        spec.preamble,
+        SHARED_INSTRUCTIONS,
+        "<solicitation_documents>",
+        "Solicitation documents:",
+    ]
     for handle, (_, name) in sorted(doc_by_handle.items()):
-        lines.append(f"[doc {handle}] {name}")
-    lines.append("Requirements in your scope:")
+        lines.append(f"[doc {handle}] {_escape_prompt_value(name)}")
+    lines.extend(["</solicitation_documents>", "<requirements>", "Requirements in your scope:"])
     for handle in sorted(req_by_handle):
         req = req_by_handle[handle]
-        weight = f" (weight: {req.weight})" if req.weight else ""
+        weight = f" (weight: {_escape_prompt_value(req.weight)})" if req.weight else ""
         lines.append(
             f"[req {handle}] [doc {doc_handle_by_id[req.document_id]}] "
-            f"{req.source} {req.ref}, page {req.page}{weight}\n"
-            f"classification: applies_to={req.applies_to}, "
-            f"obligation_type={req.obligation_type}, "
-            f"obligation_side={req.obligation_side}\n"
-            f"classification_rationale: {req.classification_rationale}\n"
-            f"extracted_record: {req.text}"
+            f"{_escape_prompt_value(req.source)} {_escape_prompt_value(req.ref)}, "
+            f"page {_escape_prompt_value(req.page)}{weight}\n"
+            f"classification: applies_to={_escape_prompt_value(req.applies_to)}, "
+            f"obligation_type={_escape_prompt_value(req.obligation_type)}, "
+            f"obligation_side={_escape_prompt_value(req.obligation_side)}\n"
+            f"classification_rationale: {_escape_prompt_value(req.classification_rationale)}\n"
+            f"extracted_record: {_escape_prompt_value(req.text)}"
         )
-    lines.append("Cited solicitation source pages:")
+    lines.extend(["</requirements>", "<solicitation_source_pages>", "Cited solicitation source pages:"])
     emitted_pages: set[tuple[str, int]] = set()
     for handle in sorted(req_by_handle):
         req = req_by_handle[handle]
@@ -405,19 +416,27 @@ def _build_prompt(spec, req_by_handle, doc_by_handle, doc_handle_by_id, matrix, 
             continue
         emitted_pages.add(page_key)
         lines.append(
-            f"[doc {doc_handle_by_id[req.document_id]}] page {req.page}: "
-            f"{req.source_page_text}"
+            f"[doc {doc_handle_by_id[req.document_id]}] page {_escape_prompt_value(req.page)}: "
+            f"{_escape_prompt_value(req.source_page_text)}"
         )
-    lines.append("Traceability matrix:")
+    lines.extend(["</solicitation_source_pages>", "<traceability_matrix>", "Traceability matrix:"])
     for ref, source, status, slide_refs, rationale in matrix:
-        lines.append(f"{ref} ({source}): {status} — slides {json.dumps(slide_refs)} — {rationale}")
-    lines.append("Proposal deck:")
+        lines.append(
+            f"{_escape_prompt_value(ref)} ({_escape_prompt_value(source)}): "
+            f"{_escape_prompt_value(status)} — slides "
+            f"{_escape_prompt_value(json.dumps(slide_refs))} — "
+            f"{_escape_prompt_value(rationale)}"
+        )
+    lines.extend(["</traceability_matrix>", "<proposal_deck>", "Proposal deck:"])
     for slide in sorted(deck_pages):
         page = deck_pages[slide]
         lines.append(
-            f"slide {slide}:\nnative_text: {page.native_text}\n"
-            f"script: {page.script_text}\nvision_summary: {page.vision_summary}"
+            f"slide {_escape_prompt_value(slide)}:\n"
+            f"native_text: {_escape_prompt_value(page.native_text)}\n"
+            f"script: {_escape_prompt_value(page.script_text)}\n"
+            f"vision_summary: {_escape_prompt_value(page.vision_summary)}"
         )
+    lines.append("</proposal_deck>")
     return "\n\n".join(lines)
 
 
@@ -446,6 +465,7 @@ def _resolve(spec, proposed, req_by_handle, doc_by_handle, deck_count) -> list[v
     for finding in proposed.findings:
         requirement_id = None
         requirement_citation = None
+        req: _ResolvedReq | None = None
         if finding.requirement_handle is not None:
             req = req_by_handle.get(finding.requirement_handle)
             if req is None:
@@ -454,6 +474,18 @@ def _resolve(spec, proposed, req_by_handle, doc_by_handle, deck_count) -> list[v
                 )
             requirement_id = req.id
             requirement_citation = (req.document_id, req.ref, req.page)
+        elif finding.finding_kind is FindingKind.gap:
+            raise ReviewError("gap must cite an in-range eligible requirement handle")
+        if finding.finding_kind is FindingKind.gap and req is not None and (
+            req.applies_to != "deck"
+            or req.obligation_type != "content"
+            or req.obligation_side != "quoter"
+        ):
+            raise ReviewError(
+                f"ineligible gap requirement handle {finding.requirement_handle}: "
+                f"applies_to={req.applies_to}, obligation_type={req.obligation_type}, "
+                f"obligation_side={req.obligation_side}"
+            )
         doc = doc_by_handle.get(finding.solicitation_document_handle)
         if doc is None:
             raise ReviewError(

@@ -262,7 +262,7 @@ def _requirement_rows(conn, analysis_id):
     return conn.execute(
         """
         SELECT id, source_document_id, source, ref, text, page_no, weight,
-               supersedes_requirement_id
+               supersedes_requirement_id, evidence_quote, grounding_verified
         FROM requirements
         WHERE analysis_id = %s
         ORDER BY ref
@@ -439,10 +439,9 @@ def test_run_extraction_rejects_unresolved_deck_scope(conn, monkeypatch):
     "changes",
     [
         {"classification_rationale": "   "},
-        {"text": "paraphrase absent from the cited page"},
     ],
 )
-def test_run_extraction_rejects_blank_rationale_or_unmatched_quote(
+def test_run_extraction_rejects_blank_rationale(
     conn, monkeypatch, changes
 ):
     analysis_id, _, _ = _package(conn)
@@ -466,9 +465,10 @@ def test_normalize_quote_strips_zero_width_format_characters(invisible):
     assert extract._normalize_quote(quote) in extract._normalize_quote(page)
 
 
-def test_run_extraction_matches_quote_despite_zero_width_spaces(conn, monkeypatch):
+def test_run_extraction_grounds_evidence_quote_despite_zero_width_spaces(
+    conn, monkeypatch
+):
     analysis_id, base_id, _ = _package(conn)
-    # Reproduce PDF extraction that wraps each line in zero-width spaces.
     conn.execute(
         "UPDATE pages SET text = %s WHERE document_id = %s AND page_no = 1",
         ("​Section L.1:​ provide​ an​ approach.​", base_id),
@@ -477,8 +477,49 @@ def test_run_extraction_matches_quote_despite_zero_width_spaces(conn, monkeypatc
 
     extract.run_extraction(conn, analysis_id)
 
-    rows = _requirement_rows(conn, analysis_id)
-    assert len(rows) == 5
+    rows = {row[3]: row for row in _requirement_rows(conn, analysis_id)}
+    assert rows["L.1"][9] is True  # grounding_verified
+
+
+def test_run_extraction_grounds_paraphrased_text_via_evidence_quote(conn, monkeypatch):
+    # Primary regression: text is a paraphrase absent from the page, but the
+    # evidence_quote is a verbatim span, so grounding passes and the row persists.
+    analysis_id, _, _ = _package(conn)
+    tool_input = _first_requirement_with(
+        text="Vendors must describe their proposed approach.",
+        evidence_quote="  Section L.1: provide an approach.  ",
+    )
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", tool_input)])
+
+    extract.run_extraction(conn, analysis_id)
+
+    rows = {row[3]: row for row in _requirement_rows(conn, analysis_id)}
+    row = rows["L.1"]
+    assert row[4] == "Vendors must describe their proposed approach."  # text
+    assert row[8] == "Section L.1: provide an approach."               # trimmed quote
+    assert row[9] is True                                              # grounding_verified
+
+
+@pytest.mark.parametrize(
+    "evidence_quote",
+    [
+        "this exact phrase is nowhere on the cited base page one",  # not a substring
+        "too short here",                                            # < 20 normalized chars
+    ],
+)
+def test_run_extraction_flags_ungrounded_quote_without_dropping(
+    conn, monkeypatch, evidence_quote
+):
+    analysis_id, _, _ = _package(conn)
+    tool_input = _first_requirement_with(evidence_quote=evidence_quote)
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", tool_input)])
+
+    extract.run_extraction(conn, analysis_id)
+
+    rows = {row[3]: row for row in _requirement_rows(conn, analysis_id)}
+    assert len(rows) == 5                 # nothing dropped
+    assert rows["L.1"][8] == evidence_quote  # quote retained for inspection
+    assert rows["L.1"][9] is False        # grounding_verified
 
 
 def test_run_extraction_allows_omitted_optional_fields(conn, monkeypatch):

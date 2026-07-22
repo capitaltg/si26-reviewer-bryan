@@ -36,6 +36,9 @@ class ExtractionError(Exception):
     """Raised when extraction output cannot be trusted or persisted."""
 
 
+EVIDENCE_QUOTE_MIN_CHARS = 20
+
+
 class RequirementSource(StrEnum):
     L = "L"
     M = "M"
@@ -369,7 +372,7 @@ def _normalize_quote(value: str) -> str:
 
 def _validate_result(
     result: ExtractionResult, documents: list[dict]
-) -> dict[str, str | None]:
+) -> tuple[dict[str, str | None], dict[str, bool]]:
     if not result.deck_scope.resolved:
         raise ExtractionError(
             "extraction did not resolve one deck scope: "
@@ -385,6 +388,7 @@ def _validate_result(
         index: {page_no: text for page_no, text in document["pages"]}
         for index, document in enumerate(documents, start=1)
     }
+    grounding_by_key: dict[str, bool] = {}
     for requirement in result.requirements:
         if requirement.source_document not in pages_by_document:
             raise ExtractionError(
@@ -397,14 +401,14 @@ def _validate_result(
                 f"{requirement.page_no} for document handle "
                 f"{requirement.source_document}"
             )
-        normalized_quote = _normalize_quote(requirement.text)
+        normalized_quote = _normalize_quote(requirement.evidence_quote)
         normalized_page = _normalize_quote(
             pages_by_document[requirement.source_document][requirement.page_no]
         )
-        if not normalized_quote or normalized_quote not in normalized_page:
-            raise ExtractionError(
-                f"requirement {requirement.key!r} text does not match its cited page"
-            )
+        grounding_by_key[requirement.key] = (
+            len(normalized_quote) >= EVIDENCE_QUOTE_MIN_CHARS
+            and normalized_quote in normalized_page
+        )
         if (
             requirement.supersedes_key is not None
             and requirement.supersedes_key not in keys_set
@@ -438,7 +442,7 @@ def _validate_result(
             visited.add(current_key)
             current_key = links[current_key]
 
-    return supersedes_by_key
+    return supersedes_by_key, grounding_by_key
 
 
 def _read_tool_result(response) -> ExtractionResult:
@@ -491,7 +495,7 @@ def run_extraction(conn: psycopg.Connection, analysis_id: str) -> None:
         ],
     )
     result = _read_tool_result(response)
-    supersedes_by_key = _validate_result(result, documents)
+    supersedes_by_key, grounding_by_key = _validate_result(result, documents)
 
     document_ids = {
         index: document["id"] for index, document in enumerate(documents, start=1)
@@ -505,9 +509,9 @@ def run_extraction(conn: psycopg.Connection, analysis_id: str) -> None:
                 INSERT INTO requirements
                     (analysis_id, source_document_id, source, ref, text, page_no,
                      applies_to, obligation_type, obligation_side,
-                     classification_rationale, weight,
-                     supersedes_requirement_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
+                     classification_rationale, weight, evidence_quote,
+                     grounding_verified, supersedes_requirement_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
                 RETURNING id
                 """,
                 (
@@ -522,6 +526,8 @@ def run_extraction(conn: psycopg.Connection, analysis_id: str) -> None:
                     requirement.obligation_side.value,
                     requirement.classification_rationale,
                     requirement.weight,
+                    requirement.evidence_quote,
+                    grounding_by_key[requirement.key],
                 ),
             ).fetchone()
             ids_by_key[requirement.key] = str(row[0])

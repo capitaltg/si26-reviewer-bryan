@@ -31,7 +31,32 @@ const model: ReportModel = {
       rationale: "Covered on slide 3.",
     },
   ],
-  applicabilityGroups: [],
+  applicabilityGroups: [
+    {
+      kind: "other_component",
+      records: [
+        {
+          requirementId: "88888888-8888-8888-8888-888888888888",
+          source: "L",
+          ref: "L.2",
+          text: "Submit the written staffing response.",
+          classificationRationale: "Handled in written Factor 1",
+        },
+      ],
+    },
+    {
+      kind: "unclassified",
+      records: [
+        {
+          requirementId: "99999999-9999-9999-9999-999999999999",
+          source: "L",
+          ref: "L.legacy",
+          text: "Legacy requirement.",
+          classificationRationale: null,
+        },
+      ],
+    },
+  ],
   reviewerGroups: [
     {
       reviewer: "compliance",
@@ -119,6 +144,19 @@ describe("ReportView", () => {
     // The vision-only provenance badge is present.
     expect(html.toLowerCase()).toContain("vision");
     expect(html.match(/Related finding group 1/g)).toHaveLength(2);
+  });
+
+  it("renders excluded records as not coverage-scored", () => {
+    const html = renderToStaticMarkup(
+      <ReportView model={model} analysisId={model.analysisId} />,
+    );
+
+    expect(html).toContain("Not coverage-scored");
+    expect(html).toContain("Handled by another submission component");
+    expect(html).toContain("L.2");
+    expect(html).toContain("Unclassified legacy records");
+    expect(html).toContain("Re-run analysis to classify this record.");
+    expect(html).not.toContain(">missing</span>");
   });
 
   it("renders a resolvable proposal citation as an interactive control", () => {

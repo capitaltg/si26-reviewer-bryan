@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the worker's stub `review` stage with three grounded reviewer calls and a deterministic citation verifier that persist citation-classified findings to a new `findings` table.
+**Goal:** Replace the worker's stub `review` stage with three grounded reviewer calls, deterministic citation verification, and persisted citation-classified findings in a new `findings` table.
 
 **Architecture:** A new `findings` table (Task 1) stores classified findings with independent `solicitation_verified` / `proposal_verified` booleans guarded by check constraints. `verify.py` (Task 2) is a pure, LLM-free function that owns the finding data contract (`ResolvedFinding` → `VerifiedFinding`) and classifies each finding `verified` / `unverified` / `dropped`. `reviewers.py` (Task 3) is one forced-tool Bedrock engine parameterized by three reviewer specs; it resolves prompt handles to database rows, calls `verify`, and persists atomically. `pipeline.py` (Task 4) runs the stage after `map`.
 
@@ -12,6 +12,7 @@
 
 - Model id: `us.anthropic.claude-opus-4-8` (cross-region inference profile; matches `extract.py` / `mapping.py` / `vision.py`).
 - Structured output is a single **forced tool call** validated **client-side** with Pydantic. Classic Bedrock `InvokeModel` rejects `messages.parse()` / `output_config.format` and `strict` tools.
+- Set `"disable_parallel_tool_use": true` inside `tool_choice`; together with the forced tool choice, this makes exactly one tool call the API-level contract rather than relying only on response validation.
 - The only trusted stop reason is `tool_use` with exactly one matching tool-use block. `end_turn`, `refusal`, `max_tokens`, or anything else fails the stage.
 - `MAX_TOKENS = 16_384`, `MAX_FINDINGS_PER_REVIEWER = 25`, `MAX_REVIEW_INPUT_CHARS = 400_000`.
 - The client is constructed lazily via a module-level `_get_client()` so tests monkeypatch it (mirror `extract._get_client`).
@@ -161,7 +162,7 @@ def test_gap_finding_persists_with_null_proposal_fields(conn):
     assert finding_id is not None
 
 
-def test_gap_with_proposal_verified_violates_check(conn):
+def test_gap_requires_proposal_verified_null(conn):
     analysis_id, requirement_id = _analysis_with_requirement(conn)
     with pytest.raises(psycopg.errors.CheckViolation):
         _insert_finding(
@@ -170,7 +171,20 @@ def test_gap_with_proposal_verified_violates_check(conn):
             requirement_id,
             finding_kind="gap",
             evidence_provenance=None,
-            proposal_verified=True,
+            proposal_verified=False,
+            verification="unverified",
+        )
+
+
+def test_observation_requires_proposal_verified(conn):
+    analysis_id, requirement_id = _analysis_with_requirement(conn)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_finding(
+            conn,
+            analysis_id,
+            requirement_id,
+            proposal_verified=None,
+            evidence_provenance=None,
             verification="unverified",
         )
 
@@ -188,6 +202,19 @@ def test_provenance_without_passing_proposal_violates_check(conn):
         )
 
 
+def test_passing_proposal_requires_provenance(conn):
+    analysis_id, requirement_id = _analysis_with_requirement(conn)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_finding(
+            conn,
+            analysis_id,
+            requirement_id,
+            proposal_verified=True,
+            evidence_provenance=None,
+            verification="unverified",
+        )
+
+
 def test_verified_requires_both_sides_for_observation(conn):
     analysis_id, requirement_id = _analysis_with_requirement(conn)
     with pytest.raises(psycopg.errors.CheckViolation):
@@ -198,6 +225,44 @@ def test_verified_requires_both_sides_for_observation(conn):
             proposal_verified=False,
             evidence_provenance=None,
             verification="verified",
+        )
+
+
+def test_verified_gap_requires_solicitation_side(conn):
+    analysis_id, requirement_id = _analysis_with_requirement(conn)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_finding(
+            conn,
+            analysis_id,
+            requirement_id,
+            finding_kind="gap",
+            evidence_provenance=None,
+            solicitation_verified=False,
+            proposal_verified=None,
+            verification="verified",
+        )
+
+
+def test_finding_rejects_invalid_reviewer_enum(conn):
+    analysis_id, requirement_id = _analysis_with_requirement(conn)
+    with pytest.raises(psycopg.errors.InvalidTextRepresentation):
+        _insert_finding(
+            conn,
+            analysis_id,
+            requirement_id,
+            reviewer="unknown",
+        )
+
+
+def test_solicitation_verified_is_required(conn):
+    analysis_id, requirement_id = _analysis_with_requirement(conn)
+    with pytest.raises(psycopg.errors.NotNullViolation):
+        _insert_finding(
+            conn,
+            analysis_id,
+            requirement_id,
+            solicitation_verified=None,
+            verification="unverified",
         )
 
 
@@ -299,10 +364,16 @@ export const findings = pgTable(
 
 Run `cd web && npm run db:generate`; retain the new `0004_*.sql` migration and every `web/drizzle/meta/` artifact it creates.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 4: Run schema lint and tests to verify they pass**
 
-Run: `cd worker && pytest tests/test_findings_schema.py -q`
-Expected: PASS.
+Run:
+
+```sh
+(cd web && npm run lint)
+(cd worker && pytest tests/test_findings_schema.py -q)
+```
+
+Expected: ESLint exits 0 and the schema tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -342,6 +413,7 @@ from worker.verify import (
 )
 
 DOC = "11111111-1111-1111-1111-111111111111"
+OTHER_DOC = "22222222-2222-2222-2222-222222222222"
 
 
 def _ctx():
@@ -444,6 +516,8 @@ def test_observation_both_sides_fail_is_unverified():
 def test_observation_nonexistent_slide_is_dropped():
     result = _one(_observation(proposal_slide=99))
     assert result.verification == "dropped"
+    assert result.solicitation_verified is True
+    assert result.proposal_verified is False
 
 
 def test_observation_nonexistent_page_is_dropped():
@@ -451,6 +525,35 @@ def test_observation_nonexistent_page_is_dropped():
         solicitation=SolicitationCitation(DOC, "base.pdf", "L.1", 99, "Provide the approach."),
     ))
     assert result.verification == "dropped"
+    assert result.solicitation_verified is False
+    assert result.proposal_verified is True
+    assert result.evidence_provenance == "native_text"
+
+
+def test_same_page_number_in_another_document_does_not_verify():
+    base_ctx = _ctx()
+    ctx = VerificationContext(
+        solicitation_pages={
+            **base_ctx.solicitation_pages,
+            (OTHER_DOC, 2): "This is unrelated attachment text.",
+        },
+        deck_pages=base_ctx.deck_pages,
+    )
+    finding = _observation(
+        solicitation=SolicitationCitation(
+            OTHER_DOC,
+            "attachment.pdf",
+            "L.1",
+            2,
+            "Provide the approach.",
+        )
+    )
+
+    result = verify.verify_findings([finding], ctx)[0]
+
+    assert result.verification == "unverified"
+    assert result.solicitation_verified is False
+    assert result.proposal_verified is True
 
 
 def test_requirement_citation_contradiction_is_dropped():
@@ -461,6 +564,8 @@ def test_requirement_citation_contradiction_is_dropped():
     ))
     # Echoed ref "L.2" contradicts the requirement handle's actual ref "L.1".
     assert result.verification == "dropped"
+    assert result.solicitation_verified is False
+    assert result.proposal_verified is True
 
 
 def test_gap_verified_by_solicitation_only():
@@ -484,6 +589,7 @@ def test_gap_unverified_when_quote_absent():
 def test_gap_carrying_proposal_evidence_is_dropped():
     result = _one(_gap(proposal_slide=1, proposal_quote="phased rollout"))
     assert result.verification == "dropped"
+    assert result.solicitation_verified is True
     assert result.proposal_verified is None
     assert "proposal" not in result.evidence
 
@@ -491,6 +597,7 @@ def test_gap_carrying_proposal_evidence_is_dropped():
 def test_observation_missing_proposal_fields_is_dropped():
     result = _one(_observation(proposal_slide=None, proposal_quote=None))
     assert result.verification == "dropped"
+    assert result.solicitation_verified is True
     assert result.proposal_verified is False
 
 
@@ -511,7 +618,7 @@ def test_matching_is_whitespace_and_case_insensitive():
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd worker && pytest tests/test_verify.py -q`
-Expected: FAIL with `ModuleNotFoundError: No module named 'worker.verify'`.
+Expected: FAIL during collection because `worker.verify` does not exist.
 
 - [ ] **Step 3: Implement the verifier**
 
@@ -600,21 +707,15 @@ def verify_findings(
     return [_verify_one(finding, ctx) for finding in findings]
 
 
-def _is_structural_failure(finding: ResolvedFinding, ctx: VerificationContext) -> bool:
+def _structural_failures(
+    finding: ResolvedFinding, ctx: VerificationContext
+) -> tuple[bool, bool]:
     is_observation = finding.finding_kind == "observation"
 
-    # Evidence fields must match the finding kind.
-    has_proposal = finding.proposal_slide is not None and finding.proposal_quote is not None
-    if is_observation and not has_proposal:
-        return True
-    if not is_observation and (
-        finding.proposal_slide is not None or finding.proposal_quote is not None
-    ):
-        return True
-
-    # Cited solicitation page must exist in the resolved document.
-    if (finding.solicitation.document_id, finding.solicitation.page) not in ctx.solicitation_pages:
-        return True
+    solicitation_failure = (
+        finding.solicitation.document_id,
+        finding.solicitation.page,
+    ) not in ctx.solicitation_pages
 
     # An echoed citation must not contradict a resolved requirement handle.
     if finding.requirement_id is not None and finding.requirement_citation is not None:
@@ -624,13 +725,21 @@ def _is_structural_failure(finding: ResolvedFinding, ctx: VerificationContext) -
             finding.solicitation.page,
         )
         if echoed != finding.requirement_citation:
-            return True
+            solicitation_failure = True
 
-    # Cited deck slide must exist for observations.
-    if is_observation and finding.proposal_slide not in ctx.deck_pages:
-        return True
+    has_proposal_shape = (
+        finding.proposal_slide is not None and finding.proposal_quote is not None
+    )
+    if is_observation:
+        proposal_failure = (
+            not has_proposal_shape or finding.proposal_slide not in ctx.deck_pages
+        )
+    else:
+        proposal_failure = (
+            finding.proposal_slide is not None or finding.proposal_quote is not None
+        )
 
-    return False
+    return solicitation_failure, proposal_failure
 
 
 def _match_provenance(finding: ResolvedFinding, ctx: VerificationContext) -> str | None:
@@ -666,24 +775,20 @@ def _build_evidence(
 
 def _verify_one(finding: ResolvedFinding, ctx: VerificationContext) -> VerifiedFinding:
     is_observation = finding.finding_kind == "observation"
+    solicitation_structural, proposal_structural = _structural_failures(finding, ctx)
 
-    if _is_structural_failure(finding, ctx):
-        return VerifiedFinding(
-            finding=finding,
-            solicitation_verified=False,
-            proposal_verified=(False if is_observation else None),
-            evidence_provenance=None,
-            verification="dropped",
-            evidence=_build_evidence(finding, None),
-        )
-
-    page_text = ctx.solicitation_pages[
-        (finding.solicitation.document_id, finding.solicitation.page)
-    ]
-    solicitation_verified = _quote_matches(finding.solicitation.quote, page_text)
+    if solicitation_structural:
+        solicitation_verified = False
+    else:
+        page_text = ctx.solicitation_pages[
+            (finding.solicitation.document_id, finding.solicitation.page)
+        ]
+        solicitation_verified = _quote_matches(finding.solicitation.quote, page_text)
 
     if is_observation:
-        provenance = _match_provenance(finding, ctx)
+        provenance = (
+            None if proposal_structural else _match_provenance(finding, ctx)
+        )
         proposal_verified: bool | None = provenance is not None
         applicable_pass = solicitation_verified and proposal_verified
     else:
@@ -691,12 +796,18 @@ def _verify_one(finding: ResolvedFinding, ctx: VerificationContext) -> VerifiedF
         proposal_verified = None
         applicable_pass = solicitation_verified
 
+    structural_failure = solicitation_structural or proposal_structural
+
     return VerifiedFinding(
         finding=finding,
         solicitation_verified=solicitation_verified,
         proposal_verified=proposal_verified,
         evidence_provenance=provenance,
-        verification="verified" if applicable_pass else "unverified",
+        verification=(
+            "dropped"
+            if structural_failure
+            else "verified" if applicable_pass else "unverified"
+        ),
         evidence=_build_evidence(finding, provenance),
     )
 ```
@@ -816,11 +927,13 @@ def _insert_requirement(conn, analysis_id, source, ref, text, page_no, weight=No
     ).fetchone()[0])
 
 
-def _package(conn, *, with_m=True):
+def _package(conn, *, with_m=True, with_sow=False):
     analysis_id = insert_analysis(conn)
     _insert_document(conn, analysis_id, BASE_DOC, "solicitation_base", "base.pdf")
     _insert_page(conn, BASE_DOC, 1, "Section L.1: Provide the technical approach.")
     _insert_page(conn, BASE_DOC, 2, "Section M.1: Technical approach is most important.")
+    if with_sow:
+        _insert_page(conn, BASE_DOC, 3, "SOW 2.1: Use a phased rollout.")
     _insert_document(conn, analysis_id, DECK_DOC, "deck", "deck.pptx")
     _insert_page(conn, DECK_DOC, 1, "Our technical approach is a phased rollout.",
                  script_text="We narrate the phased rollout.",
@@ -828,10 +941,17 @@ def _package(conn, *, with_m=True):
     l_id = _insert_requirement(conn, analysis_id, "L", "L.1", "Provide the technical approach.", 1)
     if with_m:
         _insert_requirement(conn, analysis_id, "M", "M.1", "Technical approach is most important.", 2, weight="most important")
+    if with_sow:
+        _insert_requirement(conn, analysis_id, "SOW", "SOW 2.1", "Use a phased rollout.", 3)
     return analysis_id, l_id
 
 
-def _observation_input():
+def _observation_input(
+    *,
+    ref="L.1",
+    page=1,
+    solicitation_quote="Provide the technical approach.",
+):
     return {
         "findings": [
             {
@@ -840,9 +960,9 @@ def _observation_input():
                 "severity": "high",
                 "confidence": "medium",
                 "solicitation_document_handle": 1,
-                "solicitation_ref": "L.1",
-                "solicitation_page": 1,
-                "solicitation_quote": "Provide the technical approach.",
+                "solicitation_ref": ref,
+                "solicitation_page": page,
+                "solicitation_quote": solicitation_quote,
                 "proposal_slide": 1,
                 "proposal_quote": "phased rollout",
                 "description": "The approach is addressed.",
@@ -881,10 +1001,73 @@ def test_run_review_resolves_handles_and_persists_verified(conn, monkeypatch):
     assert evidence["proposal"] == {"slide": 1, "quote": "phased rollout"}
     request = messages.calls[0]
     assert request["max_tokens"] == 16_384
-    assert request["tool_choice"] == {"type": "tool", "name": "record_findings"}
+    assert request["tool_choice"] == {
+        "type": "tool",
+        "name": "record_findings",
+        "disable_parallel_tool_use": True,
+    }
     assert request["tools"][0]["input_schema"]["properties"]["findings"]["maxItems"] == 25
     prompt = request["messages"][0]["content"][0]["text"]
     assert "[req 1]" in prompt and "[doc 1]" in prompt and "slide 1" in prompt
+    # The reviewer must receive the raw cited page, not only extraction output.
+    assert "Section L.1: Provide the technical approach." in prompt
+
+
+def test_all_applicable_reviewers_run_in_order_with_distinct_grounding(conn, monkeypatch):
+    analysis_id, _ = _package(conn, with_m=True, with_sow=True)
+    mapped_requirements = conn.execute(
+        """
+        SELECT id FROM requirements
+        WHERE analysis_id = %s AND source IN ('L', 'SOW')
+        """,
+        (analysis_id,),
+    ).fetchall()
+    for (requirement_id,) in mapped_requirements:
+        conn.execute(
+            """
+            INSERT INTO mappings (requirement_id, status, slide_refs, rationale)
+            VALUES (%s, 'covered', '[1]'::jsonb, 'Covered on slide 1.')
+            """,
+            (requirement_id,),
+        )
+    messages = _fake_client(
+        monkeypatch,
+        [
+            _FakeMessage("tool_use", _observation_input()),
+            _FakeMessage(
+                "tool_use",
+                _observation_input(
+                    ref="SOW 2.1",
+                    page=3,
+                    solicitation_quote="Use a phased rollout.",
+                ),
+            ),
+            _FakeMessage(
+                "tool_use",
+                _observation_input(
+                    ref="M.1",
+                    page=2,
+                    solicitation_quote="Technical approach is most important.",
+                ),
+            ),
+        ],
+    )
+
+    reviewers.run_review(conn, analysis_id)
+
+    assert len(messages.calls) == 3
+    prompts = [call["messages"][0]["content"][0]["text"] for call in messages.calls]
+    assert "L L.1" in prompts[0] and "SOW SOW 2.1" not in prompts[0]
+    assert "SOW SOW 2.1" in prompts[1] and "M M.1" not in prompts[1]
+    assert "M M.1" in prompts[2] and "L L.1" not in prompts[2]
+    assert "L.1 (L): covered" in prompts[0] and "SOW 2.1 (SOW): covered" not in prompts[0]
+    assert "SOW 2.1 (SOW): covered" in prompts[1] and "L.1 (L): covered" not in prompts[1]
+    assert "L.1 (L): covered" in prompts[2] and "SOW 2.1 (SOW): covered" in prompts[2]
+    assert {row[0] for row in _findings_rows(conn, analysis_id)} == {
+        "compliance",
+        "technical",
+        "evaluator",
+    }
 
 
 def test_evaluator_skipped_when_no_m_records(conn, monkeypatch):
@@ -893,9 +1076,22 @@ def test_evaluator_skipped_when_no_m_records(conn, monkeypatch):
 
     reviewers.run_review(conn, analysis_id)
 
-    reviewers_called = {c["metadata"]["reviewer"] for c in messages.calls} if messages.calls and "metadata" in messages.calls[0] else None
-    # Evaluator produces no findings; assert none are persisted for it.
+    assert len(messages.calls) == 1
     assert all(row[0] != "evaluator" for row in _findings_rows(conn, analysis_id))
+
+
+def test_no_primary_records_skip_client_construction(conn, monkeypatch):
+    analysis_id, _ = _package(conn, with_m=False)
+    conn.execute("DELETE FROM requirements WHERE analysis_id = %s", (analysis_id,))
+
+    def fail_client_construction():
+        raise AssertionError("client must stay lazy")
+
+    monkeypatch.setattr(reviewers, "_get_client", fail_client_construction)
+
+    reviewers.run_review(conn, analysis_id)
+
+    assert _findings_rows(conn, analysis_id) == []
 
 
 def test_run_review_replaces_previous_findings(conn, monkeypatch):
@@ -908,6 +1104,37 @@ def test_run_review_replaces_previous_findings(conn, monkeypatch):
     reviewers.run_review(conn, analysis_id)
     second = _findings_rows(conn, analysis_id)
     assert len(second) == 1
+
+
+def test_failure_preserves_previous_complete_findings(conn, monkeypatch):
+    analysis_id, _ = _package(conn, with_m=True)
+    evaluator_input = _observation_input(
+        ref="M.1",
+        page=2,
+        solicitation_quote="Technical approach is most important.",
+    )
+    _fake_client(
+        monkeypatch,
+        [
+            _FakeMessage("tool_use", _observation_input()),
+            _FakeMessage("tool_use", evaluator_input),
+        ],
+    )
+    reviewers.run_review(conn, analysis_id)
+    before = _findings_rows(conn, analysis_id)
+
+    # A later reviewer fails after the compliance call already succeeded.
+    _fake_client(
+        monkeypatch,
+        [
+            _FakeMessage("tool_use", _observation_input()),
+            _FakeMessage("max_tokens"),
+        ],
+    )
+    with pytest.raises(reviewers.ReviewError):
+        reviewers.run_review(conn, analysis_id)
+
+    assert _findings_rows(conn, analysis_id) == before
 
 
 @pytest.mark.parametrize("stop_reason", ["end_turn", "refusal", "max_tokens"])
@@ -967,6 +1194,20 @@ def test_wrong_tool_name_fails_stage(conn, monkeypatch):
     assert _findings_rows(conn, analysis_id) == []
 
 
+def test_multiple_tool_blocks_fail_stage(conn, monkeypatch):
+    analysis_id, _ = _package(conn, with_m=False)
+    response = _FakeMessage("tool_use", _observation_input())
+    response.content.append(
+        _FakeToolUseBlock(reviewers.FINDINGS_TOOL["name"], _observation_input())
+    )
+    _fake_client(monkeypatch, [response])
+
+    with pytest.raises(reviewers.ReviewError):
+        reviewers.run_review(conn, analysis_id)
+
+    assert _findings_rows(conn, analysis_id) == []
+
+
 def test_oversized_input_fails_before_call(conn, monkeypatch):
     analysis_id, _ = _package(conn, with_m=False)
     monkeypatch.setattr(reviewers, "MAX_REVIEW_INPUT_CHARS", 10)
@@ -979,12 +1220,10 @@ def test_oversized_input_fails_before_call(conn, monkeypatch):
     assert _findings_rows(conn, analysis_id) == []
 ```
 
-Note: `test_evaluator_skipped_when_no_m_records` asserts on persisted rows only; delete its unused `reviewers_called` line if it reads awkwardly during implementation — the meaningful assertion is that no `evaluator` row exists.
-
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd worker && pytest tests/test_reviewers.py -q`
-Expected: FAIL with `ModuleNotFoundError: No module named 'worker.reviewers'`.
+Expected: FAIL during collection because `worker.reviewers` does not exist.
 
 - [ ] **Step 3: Implement the reviewer engine**
 
@@ -1137,6 +1376,7 @@ class _ResolvedReq:
     document_id: str
     document_name: str
     weight: str | None
+    source_page_text: str
 
 
 @dataclass(frozen=True)
@@ -1243,11 +1483,13 @@ def _load_primary(
     rows = conn.execute(
         """
         SELECT r.id, r.source, r.ref, r.text, r.page_no,
-               r.source_document_id, d.display_name, r.weight
+               r.source_document_id, d.display_name, r.weight, p.text
         FROM requirements r
         JOIN documents d ON d.id = r.source_document_id
+        JOIN pages p
+          ON p.document_id = r.source_document_id AND p.page_no = r.page_no
         WHERE r.analysis_id = %s
-          AND r.source = ANY(%s)
+          AND r.source = ANY(%s::requirement_source[])
           AND NOT EXISTS (
               SELECT 1 FROM requirements s WHERE s.supersedes_requirement_id = r.id
           )
@@ -1259,6 +1501,7 @@ def _load_primary(
         _ResolvedReq(
             id=str(row[0]), source=row[1], ref=row[2], text=row[3] or "",
             page=row[4], document_id=str(row[5]), document_name=row[6], weight=row[7],
+            source_page_text=row[8] or "",
         )
         for row in rows
     ]
@@ -1272,7 +1515,12 @@ def _load_matrix(
             """
             SELECT r.ref, r.source, m.status, m.slide_refs, m.rationale
             FROM mappings m JOIN requirements r ON r.id = m.requirement_id
-            WHERE r.analysis_id = %s ORDER BY r.ref
+            WHERE r.analysis_id = %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM requirements s
+                  WHERE s.supersedes_requirement_id = r.id
+              )
+            ORDER BY r.ref
             """,
             (analysis_id,),
         ).fetchall()
@@ -1280,7 +1528,13 @@ def _load_matrix(
         """
         SELECT r.ref, r.source, m.status, m.slide_refs, m.rationale
         FROM mappings m JOIN requirements r ON r.id = m.requirement_id
-        WHERE r.analysis_id = %s AND r.source = ANY(%s) ORDER BY r.ref
+        WHERE r.analysis_id = %s
+          AND r.source = ANY(%s::requirement_source[])
+          AND NOT EXISTS (
+              SELECT 1 FROM requirements s
+              WHERE s.supersedes_requirement_id = r.id
+          )
+        ORDER BY r.ref
         """,
         (analysis_id, list(spec.matrix_sources)),
     ).fetchall()
@@ -1308,7 +1562,20 @@ def _build_prompt(spec, req_by_handle, doc_by_handle, doc_handle_by_id, matrix, 
         weight = f" (weight: {req.weight})" if req.weight else ""
         lines.append(
             f"[req {handle}] [doc {doc_handle_by_id[req.document_id]}] "
-            f"{req.source} {req.ref}, page {req.page}{weight} — {req.text}"
+            f"{req.source} {req.ref}, page {req.page}{weight}\n"
+            f"extracted_record: {req.text}"
+        )
+    lines.append("Cited solicitation source pages:")
+    emitted_pages: set[tuple[str, int]] = set()
+    for handle in sorted(req_by_handle):
+        req = req_by_handle[handle]
+        page_key = (req.document_id, req.page)
+        if page_key in emitted_pages:
+            continue
+        emitted_pages.add(page_key)
+        lines.append(
+            f"[doc {doc_handle_by_id[req.document_id]}] page {req.page}: "
+            f"{req.source_page_text}"
         )
     lines.append("Traceability matrix:")
     for ref, source, status, slide_refs, rationale in matrix:
@@ -1427,7 +1694,7 @@ def run_review(conn: psycopg.Connection, analysis_id: str) -> None:
     ctx = verify.VerificationContext(
         solicitation_pages=solicitation_pages, deck_pages=deck_pages
     )
-    client = _get_client()
+    client: AnthropicBedrock | None = None
     resolved: list[verify.ResolvedFinding] = []
     for spec in REVIEWER_SPECS:
         primary = _load_primary(conn, analysis_id, spec)
@@ -1442,11 +1709,17 @@ def run_review(conn: psycopg.Connection, analysis_id: str) -> None:
             raise ReviewError(
                 f"reviewer {spec.reviewer!r} input exceeds the single-pass guardrail"
             )
+        if client is None:
+            client = _get_client()
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
             tools=[FINDINGS_TOOL],
-            tool_choice={"type": "tool", "name": FINDINGS_TOOL["name"]},
+            tool_choice={
+                "type": "tool",
+                "name": FINDINGS_TOOL["name"],
+                "disable_parallel_tool_use": True,
+            },
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}]}],
         )
         proposed = _read_tool_result(response)
@@ -1459,7 +1732,7 @@ def run_review(conn: psycopg.Connection, analysis_id: str) -> None:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd worker && pytest tests/test_reviewers.py -q`
-Expected: PASS. (Remove the unused `reviewers_called` line noted in Step 1 if it lingers.)
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1480,9 +1753,73 @@ git commit -m "feat(worker): run three grounded reviewers with verification"
 - Consumes: `reviewers.run_review(conn, analysis_id)` (Task 3).
 - Produces: a `review` stage after `map`; `STUB_STAGES == [("report", ...)]`.
 
-- [ ] **Step 1: Add the failing pipeline-order test**
+- [ ] **Step 1: Extend the existing failing pipeline-order test**
 
-In `worker/tests/test_pipeline.py`, add a test that monkeypatches every stage function — `pipeline.ingest.ingest_document`, `pipeline.vision.run_vision_pass`, `pipeline.script_align.align_script`, `pipeline.extract.run_extraction`, `pipeline.mapping.run_mapping`, `pipeline.reviewers.run_review`, and `pipeline.jobs.update_stage` — recording the ordered, de-duplicated stage labels. Insert a deck, solicitation, and script document. Assert the label order is `ingest`, `vision`, `script_align`, `extract`, `map`, `review`, `report`, and that `run_review` is called exactly once after `run_mapping`. Follow the exact monkeypatch/recording shape already used by the existing Task-4 pipeline-order test in this file (reuse its helpers; add `reviewers.run_review` to the mocked set and `review` to the expected label list). Also assert `pipeline.STUB_STAGES == [("report", "assembling report (stub)")]`.
+In `worker/tests/test_pipeline.py`, rename
+`test_run_pipeline_orders_extraction_and_mapping_after_script_alignment` to
+`test_run_pipeline_orders_review_after_mapping`. In that existing test, add the
+review worker monkeypatch immediately after the mapping monkeypatch:
+
+```python
+    monkeypatch.setattr(
+        pipeline.reviewers,
+        "run_review",
+        lambda conn_, analysis_id_: events.append(("review_work", None)),
+    )
+```
+
+Replace the progress-detail assertion with:
+
+```python
+    assert [
+        (event, detail)
+        for event, detail in events
+        if event in {"extract", "map", "review"}
+    ] == [
+        ("extract", "extracting solicitation requirements"),
+        ("map", "mapping requirements to proposal content"),
+        (
+            "review",
+            "running compliance / technical / evaluator reviewers",
+        ),
+    ]
+```
+
+After the existing `assert_updates_precede_work("map", "map_work")`, add:
+
+```python
+    assert_updates_precede_work("review", "review_work")
+```
+
+Replace the final work-order assertion with:
+
+```python
+    work_events = [event for event, _ in events if event.endswith("_work")]
+    assert work_events.index("extract_work") < work_events.index("map_work")
+    assert work_events.index("map_work") < work_events.index("review_work")
+    assert pipeline.STUB_STAGES == [("report", "assembling report (stub)")]
+```
+
+The test's existing deck, solicitation, script, stage recorder, and expected
+stage list already cover `ingest`, `vision`, `script_align`, `extract`, `map`,
+`review`, and `report`; do not duplicate that setup in a second test.
+
+Also update
+`test_run_pipeline_skips_script_align_stage_when_no_script_document`, whose
+fixture has no solicitation document. Replace its stale assertion:
+
+```python
+    assert "review" in stages_seen
+```
+
+with:
+
+```python
+    assert "review" not in stages_seen
+```
+
+Only the `report` stub runs without a solicitation; the real `review` stage is
+inside the solicitation branch.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -1521,8 +1858,9 @@ Immediately after the `extract` / `map` block inside the `if _has_solicitation_d
 Run:
 
 ```sh
-cd worker && pytest tests/test_findings_schema.py tests/test_verify.py tests/test_reviewers.py tests/test_pipeline.py -q
-cd worker && pytest -q
+cd worker
+pytest tests/test_findings_schema.py tests/test_verify.py tests/test_reviewers.py tests/test_pipeline.py -q
+pytest -q
 ```
 
 Expected: both PASS.
@@ -1537,15 +1875,15 @@ git commit -m "feat(worker): run the review stage in the pipeline"
 ## Plan Self-Review
 
 - **Spec coverage:**
-  - *Three grounded reviewers, distinct data, gating* → Task 3 `REVIEWER_SPECS` (primary_sources / matrix_sources) + `run_review` skip on empty primary; test `test_evaluator_skipped_when_no_m_records`.
-  - *Forced tool, client-side validation, only `tool_use` trusted, parallel tool use off* → Task 3 `_read_tool_result` + `tool_choice`; Global Constraints. (Parallel-tool-use is moot under a single forced tool + `maxItems`/one-block validation; no separate flag needed on classic `InvokeModel`.)
+  - *Three grounded reviewers, distinct data, raw citation text, gating* → Task 3 `REVIEWER_SPECS` (primary_sources / matrix_sources), `_load_primary` source-page join, shared deck context, and `run_review` skip on empty primary; tests `test_all_applicable_reviewers_run_in_order_with_distinct_grounding` and `test_evaluator_skipped_when_no_m_records`.
+  - *Forced tool, client-side validation, only `tool_use` trusted, parallel tool use off* → Task 3 `_read_tool_result` and `tool_choice` with `disable_parallel_tool_use`; request and multiple-block tests.
   - *Findings table + independent verification booleans + check constraints + polymorphic evidence* → Task 1 schema and constraint tests.
-  - *Handle-only citation, out-of-range fails, contradiction dropped* → Task 3 `_resolve` (raises) + Task 2 `_is_structural_failure` contradiction path + `test_requirement_citation_contradiction_is_dropped`.
-  - *Verifier rules: structural→dropped, quote→unverified, provenance priority, gap solicitation-only, empty quote invalid, normalized matching* → Task 2 `verify.py` + `test_verify.py`.
+  - *Handle-only citation, out-of-range fails, contradiction dropped* → Task 3 `_resolve` (raises) + Task 2 `_structural_failures` contradiction path + `test_requirement_citation_contradiction_is_dropped`.
+  - *Verifier rules: structural→dropped, independently measured citation sides, quote→unverified, provenance priority, gap solicitation-only, empty quote invalid, normalized matching* → Task 2 `verify.py` + `test_verify.py`.
   - *Finding-count and input-size guards* → Task 3 `MAX_FINDINGS_PER_REVIEWER` (schema `maxItems` + Pydantic `max_length`) and `MAX_REVIEW_INPUT_CHARS`; tests `test_too_many_findings_fails_stage`, `test_oversized_input_fails_before_call`.
-  - *Idempotent atomic replacement, failure preserves prior set* → Task 3 `_persist` transaction after all calls succeed; `test_run_review_replaces_previous_findings` and the stop-reason/handle-guard tests asserting no rows written on failure.
+  - *Idempotent atomic replacement, failure preserves prior set* → Task 3 `_persist` transaction after all calls succeed; `test_run_review_replaces_previous_findings` and `test_failure_preserves_previous_complete_findings`.
   - *Pipeline order, STUB_STAGES → [report]* → Task 4.
   - *Prompt-injection defense* → Task 3 `SHARED_INSTRUCTIONS`.
   - Deferred by spec (orchestration, report UI, eval/ground-truth, precision/recall) → intentionally absent.
-- **Placeholder scan:** every code step contains complete code; no TBD/TODO. The one prose-described test (Task 4 Step 1) points at an existing in-file pattern to copy exactly, consistent with how Phase 3's plan referenced it.
+- **Placeholder scan:** every code step contains the concrete code or exact edits needed; no unresolved placeholders remain.
 - **Type consistency:** `ResolvedFinding` / `VerifiedFinding` / `SolicitationCitation` / `DeckPage` / `VerificationContext` are defined once in `verify.py` (Task 2) and imported unchanged in Task 3. `run_review(conn, analysis_id) -> None` matches the pipeline call site in Task 4. `FINDINGS_TOOL["name"]` is `record_findings` everywhere. Enum string values match the DB enums in Task 1.

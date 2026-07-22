@@ -142,6 +142,34 @@ def test_requirement_accepts_complete_classification(conn):
     assert requirement_id is not None
 
 
+def test_legacy_requirement_insert_defaults_grounding_columns(conn):
+    analysis_id, document_id = insert_solicitation_document(conn)
+    requirement_id = insert_requirement(conn, analysis_id, document_id)
+
+    row = conn.execute(
+        "SELECT evidence_quote, grounding_verified FROM requirements WHERE id = %s",
+        (requirement_id,),
+    ).fetchone()
+    assert row == ("", False)
+
+
+def test_requirement_round_trips_evidence_quote_and_grounding(conn):
+    analysis_id, document_id = insert_solicitation_document(conn)
+
+    row = conn.execute(
+        """
+        INSERT INTO requirements
+            (analysis_id, source_document_id, source, ref, text, page_no,
+             evidence_quote, grounding_verified)
+        VALUES (%s, %s, 'L', 'L.grounded', 'Deck content.', 1,
+                'a verbatim span from the cited page', true)
+        RETURNING evidence_quote, grounding_verified
+        """,
+        (analysis_id, document_id),
+    ).fetchone()
+    assert row == ("a verbatim span from the cited page", True)
+
+
 def test_applicability_migration_has_no_guessed_backfill_and_clears_mappings():
     migrations_dir = pathlib.Path(__file__).parents[2] / "web" / "drizzle"
     migration_files = sorted(migrations_dir.glob("0006_*.sql"))

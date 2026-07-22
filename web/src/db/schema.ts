@@ -154,6 +154,8 @@ export const requirements = pgTable(
     source: requirementSourceEnum("source").notNull(),
     ref: text("ref").notNull(),
     text: text("text").notNull(),
+    evidenceQuote: text("evidence_quote").notNull().default(""),
+    groundingVerified: boolean("grounding_verified").notNull().default(false),
     pageNo: integer("page_no").notNull(),
     appliesTo: requirementAppliesToEnum("applies_to"),
     obligationType: requirementObligationTypeEnum("obligation_type"),

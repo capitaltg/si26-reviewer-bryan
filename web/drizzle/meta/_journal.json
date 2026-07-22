@@ -50,6 +50,13 @@
       "when": 1784664150647,
       "tag": "0006_polite_vulcan",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784734340395,
+      "tag": "0007_melted_harpoon",
+      "breakpoints": true
     }
   ]
 }

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import StrEnum
-from html import escape
+from html import escape, unescape
 
 import psycopg
 from anthropic import AnthropicBedrock
@@ -510,14 +510,18 @@ def _resolve(spec, proposed, req_by_handle, doc_by_handle, deck_count) -> list[v
                 solicitation=verify.SolicitationCitation(
                     document_id=document_id,
                     document_name=document_name,
-                    ref=finding.solicitation_ref,
+                    ref=unescape(finding.solicitation_ref),
                     page=finding.solicitation_page,
-                    quote=finding.solicitation_quote,
+                    quote=unescape(finding.solicitation_quote),
                 ),
                 proposal_slide=finding.proposal_slide,
-                proposal_quote=finding.proposal_quote,
-                description=finding.description,
-                suggestion=finding.suggestion,
+                proposal_quote=(
+                    unescape(finding.proposal_quote)
+                    if finding.proposal_quote is not None
+                    else None
+                ),
+                description=unescape(finding.description),
+                suggestion=unescape(finding.suggestion),
                 searched_scope=searched_scope,
                 requirement_citation=requirement_citation,
             )

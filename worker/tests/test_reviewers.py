@@ -241,6 +241,9 @@ def _observation_input(
     ref="L.1",
     page=1,
     solicitation_quote="Provide the technical approach.",
+    proposal_quote="phased rollout",
+    description="The approach is addressed.",
+    suggestion="Keep it explicit.",
 ):
     return {
         "findings": [
@@ -254,9 +257,9 @@ def _observation_input(
                 "solicitation_page": page,
                 "solicitation_quote": solicitation_quote,
                 "proposal_slide": 1,
-                "proposal_quote": "phased rollout",
-                "description": "The approach is addressed.",
-                "suggestion": "Keep it explicit.",
+                "proposal_quote": proposal_quote,
+                "description": description,
+                "suggestion": suggestion,
             }
         ]
     }
@@ -362,6 +365,76 @@ def test_run_review_resolves_handles_and_persists_verified(conn, monkeypatch):
     assert "[req 1]" in prompt and "[doc 1]" in prompt and "slide 1" in prompt
     # The reviewer must receive the raw cited page, not only extraction output.
     assert "Section L.1: Provide the technical approach." in prompt
+
+
+def test_run_review_decodes_escaped_model_citations_before_verification(conn, monkeypatch):
+    analysis_id, l_id = _package(conn, with_m=False)
+    raw_solicitation_quote = 'Provide an operator\'s "technical" approach & plan.'
+    raw_proposal_quote = 'operator\'s "technical" approach & plan'
+    conn.execute(
+        "UPDATE pages SET text = %s WHERE document_id = %s AND page_no = 1",
+        (f"Section L.1: {raw_solicitation_quote}", BASE_DOC),
+    )
+    conn.execute(
+        "UPDATE pages SET text = %s WHERE document_id = %s AND page_no = 1",
+        (f"Our {raw_proposal_quote} is phased.", DECK_DOC),
+    )
+    messages = _fake_client(
+        monkeypatch,
+        [
+            _FakeMessage(
+                "tool_use",
+                _observation_input(
+                    solicitation_quote="Provide an operator&#x27;s &quot;technical&quot; approach &amp; plan.",
+                    proposal_quote="operator&#x27;s &quot;technical&quot; approach &amp; plan",
+                    description="The operator&#x27;s &quot;technical&quot; approach &amp; plan is addressed.",
+                    suggestion="Keep the operator&#x27;s &quot;technical&quot; approach &amp; plan explicit.",
+                ),
+            )
+        ],
+    )
+
+    reviewers.run_review(conn, analysis_id)
+
+    rows = _findings_rows(conn, analysis_id)
+    assert len(rows) == 1
+    _, _, requirement_id, verification, sol_ok, prop_ok, provenance, evidence = rows[0]
+    assert str(requirement_id) == l_id
+    assert verification == "verified"
+    assert sol_ok is True and prop_ok is True
+    assert provenance == "native_text"
+    assert evidence["solicitation"]["quote"] == raw_solicitation_quote
+    assert evidence["proposal"]["quote"] == raw_proposal_quote
+    details = conn.execute(
+        "SELECT description, suggestion FROM findings WHERE analysis_id = %s",
+        (analysis_id,),
+    ).fetchone()
+    assert details == (
+        'The operator\'s "technical" approach & plan is addressed.',
+        'Keep the operator\'s "technical" approach & plan explicit.',
+    )
+
+
+def test_run_review_accepts_and_persists_eligible_gap(conn, monkeypatch):
+    analysis_id, l_id = _package(conn, with_m=False)
+    _fake_client(
+        monkeypatch,
+        [_FakeMessage("tool_use", _gap_input(requirement_handle=1))],
+    )
+
+    reviewers.run_review(conn, analysis_id)
+
+    rows = _findings_rows(conn, analysis_id)
+    assert len(rows) == 1
+    reviewer, kind, requirement_id, verification, sol_ok, prop_ok, provenance, evidence = rows[0]
+    assert reviewer == "compliance"
+    assert kind == "gap"
+    assert str(requirement_id) == l_id
+    assert verification == "verified"
+    assert sol_ok is True and prop_ok is None
+    assert provenance is None
+    assert evidence["solicitation"]["quote"] == "Provide the technical approach."
+    assert evidence["searched_scope"].startswith("No addressing content found;")
 
 
 def test_all_applicable_reviewers_run_in_order_with_distinct_grounding(conn, monkeypatch):

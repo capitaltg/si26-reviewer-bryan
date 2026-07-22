@@ -236,6 +236,10 @@ export async function loadReport(
     ) {
       return "unclassified";
     }
+    // Government-side records describe the Government's own evaluation or
+    // process behavior; no quoter submission component "handles" them, so they
+    // belong with evaluation context rather than another submission component.
+    if (row.obligationSide === "government") return "deck_context";
     if (row.appliesTo === "other_component") return "other_component";
     if (row.appliesTo === "administrative") return "administrative";
     return "deck_context";

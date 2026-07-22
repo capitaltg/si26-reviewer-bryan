@@ -507,4 +507,42 @@ describe("loadReport", () => {
       sourceA.localeCompare(sourceB) || idA.localeCompare(idB),
     ));
   });
+
+  it("groups Government-side records as evaluation context, not another component", async () => {
+    const userId = await createUser();
+    const analysisId = await createAnalysis(userId, "complete");
+    const solicitationId = await createSolicitation(analysisId);
+
+    // A Government evaluation rule the classifier tagged to an artifact must
+    // not read as "handled by another submission component" — no quoter
+    // component addresses the Government's own evaluation behavior.
+    await createRequirement(analysisId, solicitationId, {
+      source: "M",
+      ref: "M.3.1",
+      appliesTo: "other_component",
+      obligationSide: "government",
+      classificationRationale: "Government evaluation weighting scheme",
+    });
+    // A genuine quoter obligation for another component stays put.
+    await createRequirement(analysisId, solicitationId, {
+      ref: "L.cover",
+      appliesTo: "other_component",
+      obligationSide: "quoter",
+      classificationRationale: "Phase 1 cover letter",
+    });
+
+    const result = await loadReport(userId, analysisId);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    expect(
+      result.model.applicabilityGroups.map((group) => [
+        group.kind,
+        group.records.map((row) => row.ref),
+      ]),
+    ).toEqual([
+      ["other_component", ["L.cover"]],
+      ["deck_context", ["M.3.1"]],
+    ]);
+  });
 });

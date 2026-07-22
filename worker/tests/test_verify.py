@@ -77,6 +77,66 @@ def test_observation_verified_by_native_text():
     assert result.evidence["proposal"] == {"slide": 1, "quote": "phased rollout"}
 
 
+def test_quote_matching_tries_exact_text_before_html_unescape():
+    ctx = VerificationContext(
+        solicitation_pages={(DOC, 2): "Section L.1: Provide the approach &amp;"},
+        deck_pages={
+            1: DeckPage(
+                slide=1,
+                native_text="Our phased &amp; rollout.",
+                script_text="",
+                vision_summary="",
+            )
+        },
+    )
+    result = verify.verify_findings(
+        [
+            _observation(
+                solicitation=SolicitationCitation(
+                    DOC, "base.pdf", "L.1", 2, "Provide the approach &amp;"
+                ),
+                proposal_quote="phased &amp; rollout",
+            )
+        ],
+        ctx,
+    )[0]
+    assert result.verification == "verified"
+    assert result.evidence["solicitation"]["quote"] == "Provide the approach &amp;"
+    assert result.evidence["proposal"]["quote"] == "phased &amp; rollout"
+
+
+def test_quote_matching_falls_back_to_decoded_html_entities():
+    ctx = VerificationContext(
+        solicitation_pages={(DOC, 2): 'Section L.1: Provide an operator\'s "approach" & plan.'},
+        deck_pages={
+            1: DeckPage(
+                slide=1,
+                native_text='Our operator\'s "approach" & plan.',
+                script_text="",
+                vision_summary="",
+            )
+        },
+    )
+    result = verify.verify_findings(
+        [
+            _observation(
+                solicitation=SolicitationCitation(
+                    DOC,
+                    "base.pdf",
+                    "L.1",
+                    2,
+                    "Provide an operator&#x27;s &quot;approach&quot; &amp; plan.",
+                ),
+                proposal_quote="operator&#x27;s &quot;approach&quot; &amp; plan",
+            )
+        ],
+        ctx,
+    )[0]
+    assert result.verification == "verified"
+    assert result.evidence["solicitation"]["quote"] == 'Provide an operator\'s "approach" & plan.'
+    assert result.evidence["proposal"]["quote"] == 'operator\'s "approach" & plan'
+
+
 def test_provenance_prefers_native_text_over_script_and_vision():
     base_ctx = _ctx()
     ctx = VerificationContext(

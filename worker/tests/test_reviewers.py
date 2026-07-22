@@ -418,9 +418,47 @@ def test_run_review_decodes_escaped_model_citations_before_verification(conn, mo
         (analysis_id,),
     ).fetchone()
     assert details == (
-        'The operator\'s "technical" approach & plan is addressed.',
-        'Keep the operator\'s "technical" approach & plan explicit.',
+        "The operator&#x27;s &quot;technical&quot; approach &amp; plan is addressed.",
+        "Keep the operator&#x27;s &quot;technical&quot; approach &amp; plan explicit.",
     )
+
+
+def test_run_review_preserves_literal_html_entities_in_citations(conn, monkeypatch):
+    analysis_id, l_id = _package(conn, with_m=False)
+    raw_solicitation_quote = "Use literal &amp; marker."
+    raw_proposal_quote = "literal &amp; marker"
+    conn.execute(
+        "UPDATE pages SET text = %s WHERE document_id = %s AND page_no = 1",
+        (f"Section L.1: {raw_solicitation_quote}", BASE_DOC),
+    )
+    conn.execute(
+        "UPDATE pages SET text = %s WHERE document_id = %s AND page_no = 1",
+        (f"Our {raw_proposal_quote} is shown.", DECK_DOC),
+    )
+    _fake_client(
+        monkeypatch,
+        [
+            _FakeMessage(
+                "tool_use",
+                _observation_input(
+                    solicitation_quote=raw_solicitation_quote,
+                    proposal_quote=raw_proposal_quote,
+                ),
+            )
+        ],
+    )
+
+    reviewers.run_review(conn, analysis_id)
+
+    rows = _findings_rows(conn, analysis_id)
+    assert len(rows) == 1
+    _, _, requirement_id, verification, sol_ok, prop_ok, provenance, evidence = rows[0]
+    assert str(requirement_id) == l_id
+    assert verification == "verified"
+    assert sol_ok is True and prop_ok is True
+    assert provenance == "native_text"
+    assert evidence["solicitation"]["quote"] == raw_solicitation_quote
+    assert evidence["proposal"]["quote"] == raw_proposal_quote
 
 
 def test_run_review_accepts_and_persists_eligible_gap(conn, monkeypatch):

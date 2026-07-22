@@ -7,6 +7,7 @@ no database access, no network, no I/O.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import unescape
 from typing import Literal
 
 
@@ -79,6 +80,17 @@ def _quote_matches(quote: str, haystack: str) -> bool:
     return needle in _normalize(haystack)
 
 
+def _matched_quote(quote: str | None, haystack: str) -> str | None:
+    if quote is None:
+        return None
+    if _quote_matches(quote, haystack):
+        return quote
+    decoded = unescape(quote)
+    if decoded != quote and _quote_matches(decoded, haystack):
+        return decoded
+    return None
+
+
 def verify_findings(
     findings: list[ResolvedFinding], ctx: VerificationContext
 ) -> list[VerifiedFinding]:
@@ -120,7 +132,9 @@ def _structural_failures(
     return solicitation_failure, proposal_failure
 
 
-def _match_provenance(finding: ResolvedFinding, ctx: VerificationContext) -> str | None:
+def _match_provenance(
+    finding: ResolvedFinding, ctx: VerificationContext
+) -> tuple[str, str] | None:
     page = ctx.deck_pages[finding.proposal_slide]
     sources = {
         "native_text": page.native_text,
@@ -128,30 +142,46 @@ def _match_provenance(finding: ResolvedFinding, ctx: VerificationContext) -> str
         "vision_summary": page.vision_summary,
     }
     for name in _PROVENANCE_ORDER:
-        if _quote_matches(finding.proposal_quote, sources[name]):
-            return name
+        matched = _matched_quote(finding.proposal_quote, sources[name])
+        if matched is not None:
+            return name, matched
     return None
 
 
-def _build_evidence(finding: ResolvedFinding) -> dict:
+def _build_evidence(
+    finding: ResolvedFinding,
+    *,
+    solicitation_quote: str | None = None,
+    proposal_quote: str | None = None,
+) -> dict:
+    solicitation_quote = (
+        finding.solicitation.quote
+        if solicitation_quote is None
+        else solicitation_quote
+    )
+    proposal_quote = (
+        finding.proposal_quote if proposal_quote is None else proposal_quote
+    )
     solicitation = {
         "document_id": finding.solicitation.document_id,
         "document_name": finding.solicitation.document_name,
         "ref": finding.solicitation.ref,
         "page": finding.solicitation.page,
-        "quote": finding.solicitation.quote,
+        "quote": solicitation_quote,
     }
     if finding.finding_kind == "gap":
         return {"solicitation": solicitation, "searched_scope": finding.searched_scope}
     return {
         "solicitation": solicitation,
-        "proposal": {"slide": finding.proposal_slide, "quote": finding.proposal_quote},
+        "proposal": {"slide": finding.proposal_slide, "quote": proposal_quote},
     }
 
 
 def _verify_one(finding: ResolvedFinding, ctx: VerificationContext) -> VerifiedFinding:
     is_observation = finding.finding_kind == "observation"
     solicitation_structural, proposal_structural = _structural_failures(finding, ctx)
+    canonical_solicitation_quote = finding.solicitation.quote
+    canonical_proposal_quote = finding.proposal_quote
 
     if solicitation_structural:
         solicitation_verified = False
@@ -159,12 +189,16 @@ def _verify_one(finding: ResolvedFinding, ctx: VerificationContext) -> VerifiedF
         page_text = ctx.solicitation_pages[
             (finding.solicitation.document_id, finding.solicitation.page)
         ]
-        solicitation_verified = _quote_matches(finding.solicitation.quote, page_text)
+        matched = _matched_quote(finding.solicitation.quote, page_text)
+        solicitation_verified = matched is not None
+        if matched is not None:
+            canonical_solicitation_quote = matched
 
     if is_observation:
-        provenance = (
-            None if proposal_structural else _match_provenance(finding, ctx)
-        )
+        provenance_match = None if proposal_structural else _match_provenance(finding, ctx)
+        provenance = None if provenance_match is None else provenance_match[0]
+        if provenance_match is not None:
+            canonical_proposal_quote = provenance_match[1]
         proposal_verified: bool | None = provenance is not None
         applicable_pass = solicitation_verified and proposal_verified
     else:
@@ -184,5 +218,9 @@ def _verify_one(finding: ResolvedFinding, ctx: VerificationContext) -> VerifiedF
             if structural_failure
             else "verified" if applicable_pass else "unverified"
         ),
-        evidence=_build_evidence(finding),
+        evidence=_build_evidence(
+            finding,
+            solicitation_quote=canonical_solicitation_quote,
+            proposal_quote=canonical_proposal_quote,
+        ),
     )

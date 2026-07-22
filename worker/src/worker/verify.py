@@ -6,6 +6,7 @@ no database access, no network, no I/O.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from html import unescape
 from typing import Literal
@@ -70,7 +71,11 @@ _PROVENANCE_ORDER = ("native_text", "script", "vision_summary")
 
 
 def _normalize(text: str) -> str:
-    return " ".join(text.split()).casefold()
+    # PDF text extraction sprinkles invisible Unicode format characters
+    # (zero-width spaces, soft hyphens, BOMs) through page text that the model
+    # drops when quoting verbatim, so strip them before matching.
+    stripped = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return " ".join(stripped.split()).casefold()
 
 
 def _quote_matches(quote: str, haystack: str) -> bool:

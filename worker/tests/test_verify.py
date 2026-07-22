@@ -306,6 +306,35 @@ def test_matching_is_whitespace_and_case_insensitive():
     assert result.solicitation_verified is True
 
 
+def test_matching_ignores_zero_width_format_characters():
+    # PDF text (Google-Docs-style export) wraps each line in zero-width spaces;
+    # the model quotes the clean text, so matching must ignore them both sides.
+    ctx = VerificationContext(
+        solicitation_pages={(DOC, 2): "​Section L.1:​ Provide​ the​ approach.​"},
+        deck_pages={
+            1: DeckPage(
+                slide=1,
+                native_text="​Our approach is a phased​ rollout.​",
+                script_text="",
+                vision_summary="",
+            )
+        },
+    )
+    result = verify.verify_findings(
+        [
+            _observation(
+                solicitation=SolicitationCitation(
+                    DOC, "base.pdf", "L.1", 2, "Provide the approach."
+                ),
+                proposal_quote="phased rollout",
+            )
+        ],
+        ctx,
+    )[0]
+    assert result.solicitation_verified is True
+    assert result.proposal_verified is True
+
+
 def test_invalid_finding_kind_is_rejected():
     with pytest.raises(ValueError, match="finding_kind"):
         _observation(finding_kind="unsupported")

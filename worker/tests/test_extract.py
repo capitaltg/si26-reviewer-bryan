@@ -449,6 +449,31 @@ def test_run_extraction_rejects_blank_rationale_or_unmatched_quote(
     assert _requirement_rows(conn, analysis_id) == []
 
 
+@pytest.mark.parametrize(
+    "invisible",
+    ["​", "‌", "‍", "﻿", "­", "⁠"],
+)
+def test_normalize_quote_strips_zero_width_format_characters(invisible):
+    page = f"Questions{invisible} Due{invisible} Date{invisible} 05/11/2026"
+    quote = "Questions Due Date 05/11/2026"
+    assert extract._normalize_quote(quote) in extract._normalize_quote(page)
+
+
+def test_run_extraction_matches_quote_despite_zero_width_spaces(conn, monkeypatch):
+    analysis_id, base_id, _ = _package(conn)
+    # Reproduce PDF extraction that wraps each line in zero-width spaces.
+    conn.execute(
+        "UPDATE pages SET text = %s WHERE document_id = %s AND page_no = 1",
+        ("​Section L.1:​ provide​ an​ approach.​", base_id),
+    )
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", _valid_input())])
+
+    extract.run_extraction(conn, analysis_id)
+
+    rows = _requirement_rows(conn, analysis_id)
+    assert len(rows) == 5
+
+
 def test_run_extraction_allows_omitted_optional_fields(conn, monkeypatch):
     analysis_id, _, _ = _package(conn)
     input_value = _result([
@@ -629,7 +654,6 @@ def test_run_extraction_rejects_missing_or_misnamed_tool_input(
     [
         _first_requirement_with(source="not-a-source"),
         _first_requirement_without("text"),
-        _first_requirement_with(unexpected_field="not allowed"),
         _first_requirement_with(source_document=0),
         _first_requirement_with(page_no=0),
     ],
@@ -642,6 +666,21 @@ def test_run_extraction_rejects_malformed_pydantic_input(conn, monkeypatch, tool
         extract.run_extraction(conn, analysis_id)
 
     assert _requirement_rows(conn, analysis_id) == []
+
+
+def test_run_extraction_ignores_model_invented_extra_fields(conn, monkeypatch):
+    # Bedrock classic cannot enforce the tool schema, so the model
+    # occasionally emits stray fields (e.g. source_document_note); drop them
+    # instead of rejecting the whole extraction.
+    tool_input = _first_requirement_with(source_document_note=None)
+    tool_input["extraction_notes"] = "chatty aside the model added"
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", tool_input)])
+    analysis_id, _, _ = _package(conn)
+
+    extract.run_extraction(conn, analysis_id)
+
+    rows = _requirement_rows(conn, analysis_id)
+    assert len(rows) == 5
 
 
 def test_run_extraction_rolls_back_replacement_after_database_failure(

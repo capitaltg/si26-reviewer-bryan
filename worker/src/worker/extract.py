@@ -76,6 +76,7 @@ class ExtractedRequirement(BaseModel):
     source: RequirementSource
     ref: str
     text: str
+    evidence_quote: str
     page_no: int = Field(ge=1)
     applies_to: AppliesTo
     obligation_type: ObligationType
@@ -85,7 +86,7 @@ class ExtractedRequirement(BaseModel):
     supersedes_key: str | None = None
 
 
-    @field_validator("key", "ref", "text", "classification_rationale")
+    @field_validator("key", "ref", "text", "evidence_quote", "classification_rationale")
     @classmethod
     def non_blank(cls, value):
         return _trimmed(value)
@@ -147,7 +148,20 @@ EXTRACTION_TOOL = {
                             "enum": ["L", "M", "SOW", "limit", "FAR", "amendment"],
                         },
                         "ref": {"type": "string"},
-                        "text": {"type": "string"},
+                        "text": {
+                            "type": "string",
+                            "description": (
+                                "A concise paraphrase of the requirement in your "
+                                "own words. Used downstream; need not be verbatim."
+                            ),
+                        },
+                        "evidence_quote": {
+                            "type": "string",
+                            "description": (
+                                "A span of at least 20 characters copied verbatim "
+                                "from the cited page that supports this requirement."
+                            ),
+                        },
                         "page_no": {"type": "integer", "minimum": 1},
                         "applies_to": {
                             "type": "string",
@@ -171,6 +185,7 @@ EXTRACTION_TOOL = {
                         "source",
                         "ref",
                         "text",
+                        "evidence_quote",
                         "page_no",
                         "applies_to",
                         "obligation_type",
@@ -292,6 +307,11 @@ Classify every record on three dimensions:
 - obligation_side: quoter for quoter behavior; government for Government
   behavior or evaluation.
 Give every record a non-empty classification_rationale.
+
+Give every record two text fields. text is a concise paraphrase of the
+requirement in your own words. evidence_quote is a span of at least 20
+characters copied verbatim from the cited page that supports the requirement;
+copy the source span rather than paraphrasing it.
 
 Use proposal_context only to resolve which single solicitation factor this
 deck fulfills. Set deck_scope.resolved=true with that factor_ref only when the

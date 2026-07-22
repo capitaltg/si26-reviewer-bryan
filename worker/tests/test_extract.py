@@ -176,6 +176,7 @@ def _requirement(
     ref,
     text,
     page_no,
+    evidence_quote,
     applies_to="deck",
     obligation_type="content",
     obligation_side="quoter",
@@ -189,6 +190,7 @@ def _requirement(
         "source": source,
         "ref": ref,
         "text": text,
+        "evidence_quote": evidence_quote,
         "page_no": page_no,
         "applies_to": applies_to,
         "obligation_type": obligation_type,
@@ -215,26 +217,31 @@ def _valid_input():
         _requirement(
             key="l-1", source_document=1, source="L", ref="L.1",
             text="provide an approach", page_no=1,
+            evidence_quote="Section L.1: provide an approach.",
         ),
         _requirement(
             key="l-1-amended", source_document=2, source="L",
             ref="L.1 revised", text="Amendment changes Section L.1.",
             page_no=2, weight="high", supersedes_key="l-1",
+            evidence_quote="Amendment changes Section L.1.",
         ),
         _requirement(
             key="m-1", source_document=3, source="M", ref="M.1",
             text="Q&A page one native text.", page_no=1,
             obligation_side="government",
+            evidence_quote="Q&A page one native text.",
         ),
         _requirement(
             key="sow-1", source_document=4, source="SOW", ref="PWS.1",
             text="Attachment page two native text.", page_no=2,
+            evidence_quote="Attachment page two native text.",
         ),
         _requirement(
             key="amendment-note-1", source_document=2, source="amendment",
             ref="A.1", text="Amendment page one native text.", page_no=1,
             applies_to="administrative",
             classification_rationale="Administrative amendment note",
+            evidence_quote="Amendment page one native text.",
         ),
     ])
 
@@ -483,6 +490,7 @@ def test_run_extraction_allows_omitted_optional_fields(conn, monkeypatch):
             "source": "L",
             "ref": "L.2",
             "text": "provide an approach",
+            "evidence_quote": "Section L.1: provide an approach.",
             "page_no": 1,
             "applies_to": "deck",
             "obligation_type": "content",
@@ -502,6 +510,44 @@ def test_run_extraction_allows_omitted_optional_fields(conn, monkeypatch):
     ]["items"]["required"]
     assert "weight" not in required
     assert "supersedes_key" not in required
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        _first_requirement_without("evidence_quote"),
+        _first_requirement_with(evidence_quote="   "),
+    ],
+)
+def test_run_extraction_requires_non_blank_evidence_quote(
+    conn, monkeypatch, tool_input
+):
+    analysis_id, _, _ = _package(conn)
+    _fake_client(monkeypatch, [_FakeMessage("tool_use", tool_input)])
+
+    with pytest.raises(extract.ExtractionError):
+        extract.run_extraction(conn, analysis_id)
+
+    assert _requirement_rows(conn, analysis_id) == []
+
+
+def test_extraction_tool_requires_evidence_quote_and_prompt_explains_roles(
+    conn, monkeypatch
+):
+    analysis_id, _, _ = _package(conn)
+    messages = _fake_client(monkeypatch, [_FakeMessage("tool_use", _valid_input())])
+    extract.run_extraction(conn, analysis_id)
+
+    schema = messages.calls[0]["tools"][0]["input_schema"]
+    item = schema["properties"]["requirements"]["items"]
+    assert "evidence_quote" in item["properties"]
+    assert "evidence_quote" in item["required"]
+    assert "paraphrase" in item["properties"]["text"]["description"]
+    assert "verbatim" in item["properties"]["evidence_quote"]["description"]
+
+    prompt = messages.calls[0]["messages"][0]["content"][0]["text"]
+    assert "text is a concise paraphrase" in prompt
+    assert "evidence_quote is a span" in prompt
 
 
 def test_run_extraction_rejects_supersession_self_reference(conn, monkeypatch):
@@ -561,6 +607,7 @@ def test_run_extraction_replaces_previous_rows(conn, monkeypatch):
             source="SOW",
             ref="PWS.1",
             text="provide an approach",
+            evidence_quote="Section L.1: provide an approach.",
             page_no=1,
         )
     ])

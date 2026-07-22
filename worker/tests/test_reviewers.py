@@ -369,8 +369,14 @@ def test_run_review_resolves_handles_and_persists_verified(conn, monkeypatch):
 
 def test_run_review_decodes_escaped_model_citations_before_verification(conn, monkeypatch):
     analysis_id, l_id = _package(conn, with_m=False)
+    raw_ref = "L.1 & 'quoted'"
+    escaped_ref = "L.1 &amp; &#x27;quoted&#x27;"
     raw_solicitation_quote = 'Provide an operator\'s "technical" approach & plan.'
     raw_proposal_quote = 'operator\'s "technical" approach & plan'
+    conn.execute(
+        "UPDATE requirements SET ref = %s WHERE id = %s",
+        (raw_ref, l_id),
+    )
     conn.execute(
         "UPDATE pages SET text = %s WHERE document_id = %s AND page_no = 1",
         (f"Section L.1: {raw_solicitation_quote}", BASE_DOC),
@@ -385,6 +391,7 @@ def test_run_review_decodes_escaped_model_citations_before_verification(conn, mo
             _FakeMessage(
                 "tool_use",
                 _observation_input(
+                    ref=escaped_ref,
                     solicitation_quote="Provide an operator&#x27;s &quot;technical&quot; approach &amp; plan.",
                     proposal_quote="operator&#x27;s &quot;technical&quot; approach &amp; plan",
                     description="The operator&#x27;s &quot;technical&quot; approach &amp; plan is addressed.",
@@ -403,6 +410,7 @@ def test_run_review_decodes_escaped_model_citations_before_verification(conn, mo
     assert verification == "verified"
     assert sol_ok is True and prop_ok is True
     assert provenance == "native_text"
+    assert evidence["solicitation"]["ref"] == raw_ref
     assert evidence["solicitation"]["quote"] == raw_solicitation_quote
     assert evidence["proposal"]["quote"] == raw_proposal_quote
     details = conn.execute(

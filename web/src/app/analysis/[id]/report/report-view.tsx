@@ -307,37 +307,6 @@ export function ReportView({
         </div>
       </SectionCard>
 
-      {model.applicabilityGroups.length > 0 && (
-        <SectionCard title="Not coverage-scored">
-          <div className="space-y-5">
-            {model.applicabilityGroups.map((group) => (
-              <div key={group.kind}>
-                <h3 className="mb-2 font-medium">
-                  {APPLICABILITY_LABEL[group.kind]}
-                </h3>
-                <ul className="space-y-2">
-                  {group.records.map((record) => (
-                    <li
-                      key={record.requirementId}
-                      className="rounded border p-3 text-sm"
-                    >
-                      <div className="font-mono">
-                        {record.source} {record.ref}
-                      </div>
-                      <p className="mt-1 text-slate-700">{record.text}</p>
-                      <p className="mt-1 text-slate-600">
-                        {record.classificationRationale ??
-                          "Re-run analysis to classify this record."}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-
       <SectionCard title="Findings">
         <div className="space-y-6">
           {model.reviewerGroups.map((group) => (
@@ -410,6 +379,37 @@ export function ReportView({
           ))}
         </div>
       </SectionCard>
+
+      {model.applicabilityGroups.length > 0 && (
+        <SectionCard title="Not coverage-scored">
+          <div className="space-y-5">
+            {model.applicabilityGroups.map((group) => (
+              <div key={group.kind}>
+                <h3 className="mb-2 font-medium">
+                  {APPLICABILITY_LABEL[group.kind]}
+                </h3>
+                <ul className="space-y-2">
+                  {group.records.map((record) => (
+                    <li
+                      key={record.requirementId}
+                      className="rounded border p-3 text-sm"
+                    >
+                      <div className="font-mono">
+                        {record.source} {record.ref}
+                      </div>
+                      <p className="mt-1 text-slate-700">{record.text}</p>
+                      <p className="mt-1 text-slate-600">
+                        {record.classificationRationale ??
+                          "Re-run analysis to classify this record."}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
 
       {active && (
         <div

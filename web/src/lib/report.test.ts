@@ -375,6 +375,41 @@ describe("loadReport", () => {
     expect(result.model.matrix[0].slideRefs).toEqual([3]);
   });
 
+  it("disambiguates matrix rows that share the same source and ref", async () => {
+    const userId = await createUser();
+    const analysisId = await createAnalysis(userId, "complete");
+    const solicitationId = await createSolicitation(analysisId);
+    await createDeck(analysisId);
+
+    // Two genuinely distinct requirements the model labelled identically.
+    const first = await createRequirement(analysisId, solicitationId, {
+      ref: "Technical Factor 3 - Oral Presentation",
+    });
+    const second = await createRequirement(analysisId, solicitationId, {
+      ref: "Technical Factor 3 - Oral Presentation",
+    });
+    // A different ref must stay untouched (no spurious "(1 of 1)").
+    const distinct = await createRequirement(analysisId, solicitationId, {
+      ref: "L.2",
+    });
+    await db.insert(mappings).values([
+      { requirementId: first, status: "covered", slideRefs: [1], rationale: "a" },
+      { requirementId: second, status: "covered", slideRefs: [2], rationale: "b" },
+      { requirementId: distinct, status: "covered", slideRefs: [3], rationale: "c" },
+    ]);
+
+    const result = await loadReport(userId, analysisId);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    const refs = result.model.matrix.map((row) => row.ref).sort();
+    expect(refs).toEqual([
+      "L.2",
+      "Technical Factor 3 - Oral Presentation (1 of 2)",
+      "Technical Factor 3 - Oral Presentation (2 of 2)",
+    ]);
+  });
+
   it("excludes requirement categories that are not coverage-mapped", async () => {
     const userId = await createUser();
     const analysisId = await createAnalysis(userId, "complete");

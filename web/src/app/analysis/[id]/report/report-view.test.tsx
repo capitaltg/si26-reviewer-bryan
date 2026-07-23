@@ -146,6 +146,25 @@ describe("ReportView", () => {
     expect(html.match(/Related finding group 1/g)).toHaveLength(2);
   });
 
+  it("renders markdown in the executive summary (bold + numbered list)", () => {
+    const withMarkdown: ReportModel = {
+      ...model,
+      summaryText:
+        "The deck is broadly compliant.\n\n" +
+        "1. **Session pacing:** consolidate slides.\n" +
+        "2. **Pickle format:** prefer ONNX.\n\n" +
+        "Overall, address item 1 first.",
+    };
+    const html = renderToStaticMarkup(
+      <ReportView model={withMarkdown} analysisId={withMarkdown.analysisId} />,
+    );
+    expect(html).toContain("<strong>Session pacing:</strong>");
+    expect(html).toContain("<ol");
+    expect(html).toContain("<li>");
+    // The raw markdown markers must not survive into the output.
+    expect(html).not.toContain("**Session pacing");
+  });
+
   it("renders excluded records as not coverage-scored", () => {
     const html = renderToStaticMarkup(
       <ReportView model={model} analysisId={model.analysisId} />,

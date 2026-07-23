@@ -36,6 +36,105 @@ const APPLICABILITY_LABEL: Record<ApplicabilityGroupKind, string> = {
   unclassified: "Unclassified legacy records",
 };
 
+// Minimal, dependency-free Markdown for model-authored prose (the orchestrator
+// writes the summary with **bold** labels and numbered lists). Supports
+// paragraphs, ordered/unordered lists, and inline bold/italic/code. It builds
+// React nodes directly — never dangerouslySetInnerHTML — so it cannot inject
+// HTML. Anything it doesn't recognize renders as plain text.
+function renderInline(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const pattern = /\*\*([^*]+)\*\*|`([^`]+)`|(?:\*|_)([^*_]+)(?:\*|_)/g;
+  let last = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > last) nodes.push(text.slice(last, match.index));
+    if (match[1] !== undefined) {
+      nodes.push(<strong key={key++}>{match[1]}</strong>);
+    } else if (match[2] !== undefined) {
+      nodes.push(
+        <code key={key++} className="rounded bg-slate-100 px-1 text-[0.9em]">
+          {match[2]}
+        </code>,
+      );
+    } else {
+      nodes.push(<em key={key++}>{match[3]}</em>);
+    }
+    last = pattern.lastIndex;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+function Markdown({ text, className }: { text: string; className?: string }) {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: React.ReactNode[] = [];
+  let paragraph: string[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
+  let key = 0;
+
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      blocks.push(
+        <p key={key++} className="mb-3 last:mb-0">
+          {renderInline(paragraph.join(" "))}
+        </p>,
+      );
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (!list) return;
+    const items = list.items.map((item, index) => (
+      <li key={index}>{renderInline(item)}</li>
+    ));
+    blocks.push(
+      list.ordered ? (
+        <ol key={key++} className="mb-3 list-decimal space-y-1 pl-5 last:mb-0">
+          {items}
+        </ol>
+      ) : (
+        <ul key={key++} className="mb-3 list-disc space-y-1 pl-5 last:mb-0">
+          {items}
+        </ul>
+      ),
+    );
+    list = null;
+  };
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      flushParagraph(); // keep an in-progress list across blank lines
+      continue;
+    }
+    const ordered = line.match(/^\d+[.)]\s+(.*)$/);
+    const unordered = line.match(/^[-*]\s+(.*)$/);
+    if (ordered) {
+      flushParagraph();
+      if (!list || !list.ordered) {
+        flushList();
+        list = { ordered: true, items: [] };
+      }
+      list.items.push(ordered[1]);
+    } else if (unordered) {
+      flushParagraph();
+      if (!list || list.ordered) {
+        flushList();
+        list = { ordered: false, items: [] };
+      }
+      list.items.push(unordered[1]);
+    } else {
+      flushList();
+      paragraph.push(line);
+    }
+  }
+  flushParagraph();
+  flushList();
+
+  return <div className={className}>{blocks}</div>;
+}
+
 function Chip({ className, children }: { className: string; children: React.ReactNode }) {
   return (
     <span className={`rounded px-2 py-0.5 text-xs font-medium ${className}`}>
@@ -219,9 +318,10 @@ export function ReportView({
       </section>
 
       <SectionCard title="Executive summary">
-        <p className="max-w-prose whitespace-pre-wrap text-sm leading-7 text-slate-700">
-          {model.summaryText}
-        </p>
+        <Markdown
+          text={model.summaryText}
+          className="max-w-prose text-sm leading-7 text-slate-700"
+        />
       </SectionCard>
 
       {model.disagreementNotes.length > 0 && (

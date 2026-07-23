@@ -286,6 +286,31 @@ def _gap_input(*, requirement_handle=None, ref="L.1", page=1, quote="Provide the
     }
 
 
+def test_gap_with_proposal_evidence_is_coerced_not_rejected():
+    # A looser model may attach a stray slide/quote to a gap. The finding must
+    # survive with the proposal evidence dropped, not crash the review.
+    finding = reviewers.ProposedFinding.model_validate(
+        {
+            "requirement_handle": 1,
+            "finding_kind": "gap",
+            "severity": "high",
+            "confidence": "medium",
+            "solicitation_document_handle": 1,
+            "solicitation_ref": "L.1",
+            "solicitation_page": 1,
+            "solicitation_quote": "Provide the technical approach.",
+            "proposal_slide": 3,
+            "proposal_quote": "a partial mention",
+            "description": "The requirement is not adequately addressed.",
+            "suggestion": "Add the missing content.",
+        }
+    )
+
+    assert finding.finding_kind is reviewers.FindingKind.gap
+    assert finding.proposal_slide is None
+    assert finding.proposal_quote is None
+
+
 def _findings_rows(conn, analysis_id):
     return conn.execute(
         """

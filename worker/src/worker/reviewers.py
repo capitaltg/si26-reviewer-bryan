@@ -83,8 +83,12 @@ class ProposedFinding(BaseModel):
             if self.proposal_slide is None or not (self.proposal_quote or "").strip():
                 raise ValueError("observation requires proposal_slide and non-empty proposal_quote")
         else:
-            if self.proposal_slide is not None or self.proposal_quote is not None:
-                raise ValueError("gap must not carry proposal evidence")
+            # A gap means the deck does not cover the obligation, so it carries
+            # no proposal evidence. Models (especially at looser instruction
+            # adherence) sometimes attach a stray slide/quote to a gap anyway;
+            # drop it and keep the gap rather than failing the whole review.
+            self.proposal_slide = None
+            self.proposal_quote = None
         return self
 
 

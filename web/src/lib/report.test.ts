@@ -265,6 +265,36 @@ describe("loadReport", () => {
     expect(result.model.reviewerGroups.map((g) => g.reviewer)).toContain("technical");
   });
 
+  it("normalizes literal \\n escape sequences in summary and notes", async () => {
+    const userId = await createUser();
+    const analysisId = await createAnalysis(userId, "complete");
+    await createSolicitation(analysisId);
+    await createDeck(analysisId);
+    const a = await createGapFinding(analysisId, "compliance");
+    const b = await createGapFinding(analysisId, "technical");
+
+    await db.insert(summaries).values({
+      analysisId,
+      // Stored with literal backslash-n, as the orchestrator model sometimes
+      // emitted before the worker-side normalization landed.
+      summaryText: "First paragraph.\\n\\nSecond paragraph.",
+      disagreementNotes: [
+        {
+          finding_ids: [a, b],
+          reviewers: ["compliance", "technical"],
+          note: "Point one.\\nPoint two.",
+        },
+      ],
+    });
+
+    const result = await loadReport(userId, analysisId);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    expect(result.model.summaryText).toBe("First paragraph.\n\nSecond paragraph.");
+    expect(result.model.disagreementNotes[0].note).toBe("Point one.\nPoint two.");
+  });
+
   it("uses numeric weights for Section M findings only", async () => {
     const userId = await createUser();
     const analysisId = await createAnalysis(userId, "complete");

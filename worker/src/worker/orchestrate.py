@@ -32,6 +32,19 @@ EMPTY_SUMMARY_TEXT = (
 )
 
 
+def _normalize_escaped_newlines(value: str) -> str:
+    """Turn the literal two-character escape sequences the model sometimes
+    emits for line breaks (``\\r\\n`` / ``\\n`` / ``\\r`` as backslash-n text,
+    not real newlines) into actual newlines.
+
+    Left un-normalized these render as literal ``\\n`` on the report page,
+    which uses ``whitespace-pre-wrap`` to show real newlines as paragraph
+    breaks. Applied to model-authored prose (summary, disagreement notes).
+    """
+
+    return value.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+
+
 class OrchestrateError(Exception):
     """Raised when an orchestration response cannot be trusted or persisted."""
 
@@ -61,6 +74,7 @@ class _DisagreementNote(BaseModel):
     @field_validator("note")
     @classmethod
     def _note_bounds(cls, value: str) -> str:
+        value = _normalize_escaped_newlines(value)
         if not value.strip():
             raise ValueError("note must be non-empty after trimming")
         if len(value) > MAX_NOTE_CHARS:
@@ -80,6 +94,7 @@ class _Orchestration(BaseModel):
     @field_validator("summary")
     @classmethod
     def _summary_bounds(cls, value: str) -> str:
+        value = _normalize_escaped_newlines(value)
         if not value.strip():
             raise ValueError("summary must be non-empty after trimming")
         if len(value) > MAX_SUMMARY_CHARS:

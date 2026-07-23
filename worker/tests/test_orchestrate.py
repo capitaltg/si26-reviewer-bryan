@@ -749,6 +749,34 @@ def test_orchestrate_with_no_verified_findings_writes_empty_summary(conn, monkey
     assert _cluster_of(conn, unverified) is None
 
 
+def test_normalize_escaped_newlines_converts_literal_sequences():
+    assert (
+        orchestrate._normalize_escaped_newlines("one\\n\\ntwo")
+        == "one\n\ntwo"
+    )
+    assert orchestrate._normalize_escaped_newlines("a\\r\\nb") == "a\nb"
+    # Real newlines and unrelated backslashes are left untouched.
+    assert orchestrate._normalize_escaped_newlines("real\nline") == "real\nline"
+
+
+def test_orchestration_validator_normalizes_summary_and_notes():
+    orchestration = orchestrate._Orchestration.model_validate(
+        {
+            "cluster_assignments": [
+                {"finding_handle": 1, "cluster_key": 1},
+                {"finding_handle": 2, "cluster_key": 1},
+            ],
+            "disagreement_notes": [
+                {"finding_handles": [1, 2], "note": "first\\n\\nsecond"}
+            ],
+            "summary": "para one\\n\\npara two",
+        }
+    )
+
+    assert orchestration.summary == "para one\n\npara two"
+    assert orchestration.disagreement_notes[0].note == "first\n\nsecond"
+
+
 def test_persist_rolls_back_on_summary_check_violation(conn):
     analysis_id = insert_analysis(conn)
     finding_id = _insert_finding(conn, analysis_id, "compliance")

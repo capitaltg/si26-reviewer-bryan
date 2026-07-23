@@ -28,7 +28,7 @@ from . import blob
 # not the newer bedrock-mantle:* actions). Newer models require a cross-region
 # inference-profile ID rather than the bare model ID; the `us.` profile keeps
 # inference in US regions, so AWS_REGION must be a US region.
-MODEL = "us.anthropic.claude-opus-4-8"
+MODEL = "us.anthropic.claude-sonnet-4-6"
 # A dense slide (org chart, schedule table) can need a long summary. A
 # `max_tokens` stop reason is treated as untrusted and aborts the whole
 # analysis (see _UNTRUSTED_STOP_REASONS), so this budget must be generous

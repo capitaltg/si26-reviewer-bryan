@@ -19,7 +19,7 @@ from pydantic import (
 from psycopg.types.json import Json
 
 
-MODEL = "us.anthropic.claude-opus-4-8"
+MODEL = "us.anthropic.claude-sonnet-4-6"
 MAX_MAPPING_OUTPUT_REQUIREMENTS = 200
 MAX_TOKENS = 16_384
 

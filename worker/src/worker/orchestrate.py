@@ -19,7 +19,7 @@ from anthropic import AnthropicBedrock
 from psycopg.types.json import Json
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-MODEL = "us.anthropic.claude-opus-4-8"
+MODEL = "us.anthropic.claude-sonnet-4-6"
 MAX_TOKENS = 16_384
 MAX_DISAGREEMENT_NOTES = 50
 MAX_NOTE_CHARS = 2_000

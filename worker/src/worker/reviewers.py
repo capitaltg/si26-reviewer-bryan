@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from . import verify
 
-MODEL = "us.anthropic.claude-opus-4-8"
+MODEL = "us.anthropic.claude-sonnet-4-6"
 MAX_TOKENS = 16_384
 MAX_FINDINGS_PER_REVIEWER = 25
 MAX_REVIEW_INPUT_CHARS = 400_000

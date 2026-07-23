@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 
-MODEL = "us.anthropic.claude-opus-4-8"
+MODEL = "us.anthropic.claude-sonnet-4-6"
 # evidence_quote + classification_rationale are required per requirement, so a
 # solicitation with many requirements can emit well past the old 16k cap and
 # stop with an untrusted `max_tokens` reason. Stream (below) to lift the SDK's

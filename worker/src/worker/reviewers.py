@@ -591,6 +591,7 @@ def run_review(conn: psycopg.Connection, analysis_id: str) -> None:
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
+            temperature=0,
             tools=[FINDINGS_TOOL],
             tool_choice={
                 "type": "tool",

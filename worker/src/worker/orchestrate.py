@@ -377,6 +377,7 @@ def run_orchestrate(conn: psycopg.Connection, analysis_id: str) -> None:
     response = _get_client().messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
+        temperature=0,
         tools=[ORCHESTRATION_TOOL],
         tool_choice={
             "type": "tool",

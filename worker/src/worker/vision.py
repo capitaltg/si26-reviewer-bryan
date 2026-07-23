@@ -144,6 +144,7 @@ def vision_pass_page(conn: psycopg.Connection, page: Page) -> None:
     response = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
+        temperature=0,
         tools=[VISION_TOOL],
         tool_choice={"type": "tool", "name": VISION_TOOL["name"]},
         messages=[

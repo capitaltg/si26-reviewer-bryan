@@ -497,6 +497,7 @@ def run_extraction(conn: psycopg.Connection, analysis_id: str) -> None:
     with _get_client().messages.stream(
         model=MODEL,
         max_tokens=MAX_TOKENS,
+        temperature=0,
         tools=[EXTRACTION_TOOL],
         tool_choice={"type": "tool", "name": EXTRACTION_TOOL["name"]},
         messages=[

@@ -19,7 +19,11 @@ from pydantic import (
 
 
 MODEL = "us.anthropic.claude-opus-4-8"
-MAX_TOKENS = 16_384
+# evidence_quote + classification_rationale are required per requirement, so a
+# solicitation with many requirements can emit well past the old 16k cap and
+# stop with an untrusted `max_tokens` reason. Stream (below) to lift the SDK's
+# ~21k non-streaming ceiling and give large solicitations comfortable headroom.
+MAX_TOKENS = 65_536
 # Keep the complete prompt well below the verified 200k-token context window;
 # this character guardrail leaves room for the response and request envelope.
 MAX_EXTRACTION_INPUT_CHARS = 400_000
@@ -299,6 +303,14 @@ amendment only for a change note that is not itself an obligation. Cite only
 the 1-based solicitation [doc N] handles and page numbers. Assign every record
 a unique key and set supersedes_key only when the record replaces another key.
 
+Give every record a ref that uniquely identifies the record within its section:
+prefer the solicitation's own clause or factor number, but when several distinct
+records fall under one heading (for example an oral-presentation factor with
+both a coverage-of-topics requirement and a live-demonstration requirement),
+append a short distinguishing descriptor so no two records share an identical
+ref (for example "Technical Factor 3 — enumerated topics" versus "Technical
+Factor 3 — working-capability demonstration").
+
 Classify every record on three dimensions:
 - applies_to: deck for the oral-presentation or demonstration factor and the
   SOW scope it walks through; other_component for a written factor, price
@@ -482,7 +494,7 @@ def run_extraction(conn: psycopg.Connection, analysis_id: str) -> None:
             "document splitting is not supported"
         )
 
-    response = _get_client().messages.create(
+    with _get_client().messages.stream(
         model=MODEL,
         max_tokens=MAX_TOKENS,
         tools=[EXTRACTION_TOOL],
@@ -493,7 +505,8 @@ def run_extraction(conn: psycopg.Connection, analysis_id: str) -> None:
                 "content": [{"type": "text", "text": prompt}],
             }
         ],
-    )
+    ) as stream:
+        response = stream.get_final_message()
     result = _read_tool_result(response)
     supersedes_by_key, grounding_by_key = _validate_result(result, documents)
 

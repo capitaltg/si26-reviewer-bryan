@@ -40,18 +40,37 @@ class _FakeMessage:
         )
 
 
+class _FakeStream:
+    """Context manager mirroring messages.stream(...).get_final_message()."""
+
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get_final_message(self):
+        return self._message
+
+
 class _FakeMessagesClient:
-    """Queues fake responses and records each Bedrock messages.create call."""
+    """Queues fake responses and records each Bedrock messages.stream call."""
 
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls: list[dict] = []
 
-    def create(self, **kwargs):
+    def _next_response(self, **kwargs):
         self.calls.append(kwargs)
         if len(self.responses) == 1:
             return self.responses[0]
         return self.responses[len(self.calls) - 1]
+
+    def stream(self, **kwargs):
+        return _FakeStream(self._next_response(**kwargs))
 
 
 def _fake_client(monkeypatch, responses):
@@ -293,7 +312,7 @@ def test_run_extraction_resolves_document_handles_and_supersession(conn, monkeyp
     assert rows_by_ref["A.1"][2] == "amendment"
     assert len(messages.calls) == 1
     request = messages.calls[0]
-    assert request["max_tokens"] == 16_384
+    assert request["max_tokens"] == 65_536
     assert len(request["tools"]) == 1
     assert request["tools"][0] == extract.EXTRACTION_TOOL
     assert request["tools"][0]["name"] == "record_extraction"
@@ -589,6 +608,7 @@ def test_extraction_tool_requires_evidence_quote_and_prompt_explains_roles(
     prompt = messages.calls[0]["messages"][0]["content"][0]["text"]
     assert "text is a concise paraphrase" in prompt
     assert "evidence_quote is a span" in prompt
+    assert "uniquely identifies the record within its section" in prompt
 
 
 def test_run_extraction_rejects_supersession_self_reference(conn, monkeypatch):

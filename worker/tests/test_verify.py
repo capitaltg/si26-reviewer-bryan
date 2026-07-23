@@ -247,15 +247,43 @@ def test_same_page_number_in_another_document_does_not_verify():
     assert result.proposal_verified is True
 
 
-def test_requirement_citation_contradiction_is_dropped():
+def test_requirement_citation_document_contradiction_is_dropped():
     result = _one(_observation(
         requirement_id="req-1",
         requirement_citation=(DOC, "L.1", 2),
-        solicitation=SolicitationCitation(DOC, "base.pdf", "L.2", 2, "Provide the approach."),
+        solicitation=SolicitationCitation(OTHER_DOC, "base.pdf", "L.1", 2, "Provide the approach."),
     ))
-    # Echoed ref "L.2" contradicts the requirement handle's actual ref "L.1".
+    # Echoed document contradicts the requirement handle's actual document.
     assert result.verification == "dropped"
     assert result.solicitation_verified is False
+    assert result.proposal_verified is True
+
+
+def test_requirement_citation_page_contradiction_is_dropped():
+    result = _one(_observation(
+        requirement_id="req-1",
+        requirement_citation=(DOC, "L.1", 2),
+        solicitation=SolicitationCitation(DOC, "base.pdf", "L.1", 5, "Provide the approach."),
+    ))
+    # Echoed page contradicts the requirement handle's actual page.
+    assert result.verification == "dropped"
+    assert result.solicitation_verified is False
+    assert result.proposal_verified is True
+
+
+def test_requirement_citation_ref_label_mismatch_is_tolerated():
+    # Reviewers are shown "{source} {ref}" as one combined label and may echo
+    # a more descriptive ref (source-prefixed, or with extra title text) than
+    # the bare stored ref. Same document and page: this is not a contradiction.
+    result = _one(_observation(
+        requirement_id="req-1",
+        requirement_citation=(DOC, "L.1", 2),
+        solicitation=SolicitationCitation(
+            DOC, "base.pdf", "L 2.4 Factor 3 Guidance", 2, "Provide the approach."
+        ),
+    ))
+    assert result.verification == "verified"
+    assert result.solicitation_verified is True
     assert result.proposal_verified is True
 
 

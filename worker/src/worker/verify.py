@@ -113,13 +113,15 @@ def _structural_failures(
     ) not in ctx.solicitation_pages
 
     # An echoed citation must not contradict a resolved requirement handle.
+    # Only document/page identify a location; ref is a human-readable label
+    # reviewers may echo more descriptively (e.g. source-prefixed) than the
+    # bare stored ref without that being a genuine contradiction.
     if finding.requirement_id is not None and finding.requirement_citation is not None:
-        echoed = (
-            finding.solicitation.document_id,
-            finding.solicitation.ref,
-            finding.solicitation.page,
+        requirement_document_id, _requirement_ref, requirement_page = (
+            finding.requirement_citation
         )
-        if echoed != finding.requirement_citation:
+        echoed_location = (finding.solicitation.document_id, finding.solicitation.page)
+        if echoed_location != (requirement_document_id, requirement_page):
             solicitation_failure = True
 
     has_proposal_shape = (

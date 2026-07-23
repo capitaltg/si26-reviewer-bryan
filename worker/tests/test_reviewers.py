@@ -311,6 +311,18 @@ def test_gap_with_proposal_evidence_is_coerced_not_rejected():
     assert finding.proposal_quote is None
 
 
+def test_read_tool_result_coerces_stringified_findings():
+    import json
+
+    valid = _observation_input()
+    stringified = {"findings": json.dumps(valid["findings"])}
+
+    result = reviewers._read_tool_result(_FakeMessage("tool_use", stringified))
+
+    assert len(result.findings) == 1
+    assert result.findings[0].finding_kind is reviewers.FindingKind.observation
+
+
 def _findings_rows(conn, analysis_id):
     return conn.execute(
         """

@@ -159,6 +159,22 @@ def _orchestration_input(cluster_assignments, disagreement_notes=None, summary="
     }
 
 
+def test_read_tool_result_coerces_stringified_containers():
+    import json
+
+    valid = _orchestration_input([{"finding_handle": 1, "cluster_key": 1}])
+    stringified = {
+        "cluster_assignments": json.dumps(valid["cluster_assignments"]),
+        "disagreement_notes": json.dumps(valid["disagreement_notes"]),
+        "summary": valid["summary"],
+    }
+
+    result = orchestrate._read_tool_result(_FakeMessage("tool_use", stringified))
+
+    assert len(result.cluster_assignments) == 1
+    assert result.cluster_assignments[0].cluster_key == 1
+
+
 def _cluster_of(conn, finding_id):
     return conn.execute(
         "SELECT cluster_id FROM findings WHERE id = %s", (finding_id,)

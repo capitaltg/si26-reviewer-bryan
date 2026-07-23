@@ -268,6 +268,26 @@ def _build_prompt(findings: list[_VerifiedFinding]) -> str:
     return "\n\n".join(lines)
 
 
+def _coerce_stringified_containers(tool_input):
+    """Recover container fields a model returned as JSON-encoded strings
+    (e.g. ``cluster_assignments`` as ``'[{...}]'``) instead of native lists.
+    Non-decodable strings are left untouched so genuine validation errors
+    still surface.
+    """
+
+    if not isinstance(tool_input, dict):
+        return tool_input
+    coerced = dict(tool_input)
+    for field in ("cluster_assignments", "disagreement_notes"):
+        value = coerced.get(field)
+        if isinstance(value, str):
+            try:
+                coerced[field] = json.loads(value)
+            except (ValueError, TypeError):
+                pass
+    return coerced
+
+
 def _read_tool_result(response) -> _Orchestration:
     if getattr(response, "stop_reason", None) != "tool_use":
         raise OrchestrateError(
@@ -287,8 +307,9 @@ def _read_tool_result(response) -> _Orchestration:
             f"orchestration response did not contain exactly one "
             f"{ORCHESTRATION_TOOL['name']!r} tool use"
         )
+    tool_input = _coerce_stringified_containers(getattr(tool_blocks[0], "input", None))
     try:
-        return _Orchestration.model_validate(getattr(tool_blocks[0], "input", None))
+        return _Orchestration.model_validate(tool_input)
     except ValidationError as exc:
         raise OrchestrateError(f"invalid orchestration tool input: {exc}") from exc
 

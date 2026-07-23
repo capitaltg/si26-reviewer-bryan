@@ -457,6 +457,29 @@ def _validate_result(
     return supersedes_by_key, grounding_by_key
 
 
+def _coerce_stringified_containers(tool_input):
+    """Recover container fields a model returned as a JSON-encoded *string*.
+
+    Models sometimes emit ``requirements``/``deck_scope`` as a stringified
+    array/object (e.g. ``'[{...}]'``) inside the tool input instead of a native
+    list/object. The string is itself valid JSON, so decode it back to the
+    structure the schema expects; anything that is not a decodable JSON string
+    is left untouched so genuine validation errors still surface.
+    """
+
+    if not isinstance(tool_input, dict):
+        return tool_input
+    coerced = dict(tool_input)
+    for field in ("requirements", "deck_scope"):
+        value = coerced.get(field)
+        if isinstance(value, str):
+            try:
+                coerced[field] = json.loads(value)
+            except (ValueError, TypeError):
+                pass
+    return coerced
+
+
 def _read_tool_result(response) -> ExtractionResult:
     if response.stop_reason in {"refusal", "max_tokens"}:
         raise ExtractionError(
@@ -475,7 +498,7 @@ def _read_tool_result(response) -> ExtractionResult:
             f"extraction response did not contain exactly one "
             f"{EXTRACTION_TOOL['name']!r} tool use"
         )
-    tool_input = getattr(tool_blocks[0], "input", None)
+    tool_input = _coerce_stringified_containers(getattr(tool_blocks[0], "input", None))
     try:
         return ExtractionResult.model_validate(tool_input)
     except ValidationError as exc:

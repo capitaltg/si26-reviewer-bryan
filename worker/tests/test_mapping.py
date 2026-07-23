@@ -169,6 +169,18 @@ def _mapping_input(requirement_ids, *, slide_refs=None, status="covered"):
     }
 
 
+def test_read_tool_result_coerces_stringified_mappings():
+    import json
+
+    valid = _mapping_input(["req-1"])
+    stringified = {"mappings": json.dumps(valid["mappings"])}
+
+    result = mapping._read_tool_result(_FakeMessage("tool_use", stringified))
+
+    assert len(result.mappings) == 1
+    assert result.mappings[0].requirement_id == "req-1"
+
+
 def _selected_requirement_ids(conn, analysis_id):
     return [
         str(row[0])

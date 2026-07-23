@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from html import escape
 from typing import Annotated
@@ -215,6 +216,24 @@ summary, and aligned narration together as evidence.
     return "\n\n".join(sections)
 
 
+def _coerce_stringified_containers(tool_input):
+    """Recover the ``mappings`` container a model returned as a JSON-encoded
+    string instead of a native list. A non-decodable string is left untouched
+    so genuine validation errors still surface.
+    """
+
+    if not isinstance(tool_input, dict):
+        return tool_input
+    coerced = dict(tool_input)
+    value = coerced.get("mappings")
+    if isinstance(value, str):
+        try:
+            coerced["mappings"] = json.loads(value)
+        except (ValueError, TypeError):
+            pass
+    return coerced
+
+
 def _read_tool_result(response) -> MappingResult:
     if getattr(response, "stop_reason", None) != "tool_use":
         raise MappingError(
@@ -236,8 +255,9 @@ def _read_tool_result(response) -> MappingResult:
             f"{MAPPING_TOOL['name']!r} tool use"
         )
 
+    tool_input = _coerce_stringified_containers(getattr(tool_blocks[0], "input", None))
     try:
-        return MappingResult.model_validate(getattr(tool_blocks[0], "input", None))
+        return MappingResult.model_validate(tool_input)
     except ValidationError as exc:
         raise MappingError(f"invalid mapping tool input: {exc}") from exc
 

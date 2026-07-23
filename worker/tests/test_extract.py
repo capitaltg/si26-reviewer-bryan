@@ -290,6 +290,24 @@ def _requirement_rows(conn, analysis_id):
     ).fetchall()
 
 
+def test_read_tool_result_coerces_stringified_containers():
+    import json
+
+    valid = _valid_input()
+    # A looser model may return the array/object as a JSON-encoded string
+    # instead of a native list/object. It must be recovered, not rejected.
+    stringified = {
+        "requirements": json.dumps(valid["requirements"]),
+        "deck_scope": json.dumps(valid["deck_scope"]),
+    }
+
+    result = extract._read_tool_result(_FakeMessage("tool_use", stringified))
+
+    assert len(result.requirements) == len(valid["requirements"])
+    assert result.deck_scope.resolved is True
+    assert result.deck_scope.factor_ref == "Factor 3"
+
+
 def test_run_extraction_resolves_document_handles_and_supersession(conn, monkeypatch):
     analysis_id, base_id, amendment_id = _package(conn)
     messages = _fake_client(monkeypatch, [_FakeMessage("tool_use", _valid_input())])

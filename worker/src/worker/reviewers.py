@@ -456,6 +456,25 @@ def _build_prompt(spec, req_by_handle, doc_by_handle, doc_handle_by_id, matrix, 
     return "\n\n".join(lines)
 
 
+def _coerce_stringified_containers(tool_input):
+    """Recover a container field a model returned as a JSON-encoded string
+    (e.g. ``findings`` as ``'[{...}]'``) instead of a native list. Anything
+    that is not a decodable JSON string is left untouched so genuine
+    validation errors still surface.
+    """
+
+    if not isinstance(tool_input, dict):
+        return tool_input
+    coerced = dict(tool_input)
+    value = coerced.get("findings")
+    if isinstance(value, str):
+        try:
+            coerced["findings"] = json.loads(value)
+        except (ValueError, TypeError):
+            pass
+    return coerced
+
+
 def _read_tool_result(response) -> ProposedFindings:
     if getattr(response, "stop_reason", None) != "tool_use":
         raise ReviewError(
@@ -470,8 +489,9 @@ def _read_tool_result(response) -> ProposedFindings:
         raise ReviewError(
             f"reviewer response did not contain exactly one {FINDINGS_TOOL['name']!r} tool use"
         )
+    tool_input = _coerce_stringified_containers(getattr(tool_blocks[0], "input", None))
     try:
-        return ProposedFindings.model_validate(getattr(tool_blocks[0], "input", None))
+        return ProposedFindings.model_validate(tool_input)
     except ValidationError as exc:
         raise ReviewError(f"invalid reviewer tool input: {exc}") from exc
 

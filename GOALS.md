@@ -2,7 +2,7 @@
 
 ## One-line summary
 
-An advisory-only web tool that reviews a GovCon oral-proposal package (PowerPoint deck + planned narration script) against the actual solicitation, and produces grounded, citation-backed findings from three specialized AI reviewers — without ever editing the proposal itself.
+The only review tool built for the oral-proposal artifact itself — rehearsal-prep for a GovCon oral-proposal package (PowerPoint deck + planned narration script), critiquing it against what it'll actually be scored on in the solicitation, without ever editing the proposal itself. (See [ADR-0001](docs/adr/0001-reposition-around-deck-specific-critique.md).)
 
 ## Problem
 
@@ -23,7 +23,7 @@ Oral-proposal task-order competitions (confirmed format for the target vehicle):
 
 ## Anchor feature
 
-**Two-sided compliance / traceability matrix.** Extract every "shall/must/will" requirement from Section L and every evaluation factor from Section M, then map each requirement to where (or whether) the deck/script addresses it. Automatic gap flagging. This is the single highest-value feature — well-defined, verifiable, and exactly what compliance reviewers spend hours doing by hand. Everything else builds on it.
+**Two-sided compliance / traceability matrix, honestly scoped to the deck.** Extract every "shall/must/will" requirement from Section L and every evaluation factor from Section M, classify each one (`applies_to` / `obligation_type` / `obligation_side`), and map only the requirements this artifact set could ever answer — deck-applicable, content, quoter-side — to where (or whether) the deck/script addresses it. On a real bid, most Section L/M requirements belong to written volumes, price, or admin process, not the oral deck; the matrix will be small, and that's correct, not a shortfall. Every excluded requirement still surfaces in a **"Not coverage-scored"** section with its classification rationale — proof the tool knows what it isn't answering, rather than faking a gap against an artifact that was never going to cover it. This honest scoping is what makes the matrix trustworthy, not how many rows it has.
 
 ## The three reviewers (MVP)
 
@@ -57,18 +57,23 @@ Three screens, nothing more for MVP:
 
 **Data handling:** uploaded proposals are private, short-lived (deleted after session or N days), never in a public bucket. Real drafts require the owner's explicit sign-off (including that content transits an LLM API), a check of distribution markings (Proprietary / Source Selection Sensitive / CUI / ITAR = stop and get info-security sign-off), and a sanitized or synthetic stand-in for any public demo.
 
-## Evaluation plan (built in week 1, not week 6)
+## Evaluation plan (two-track — see [ADR-0002](docs/adr/0002-two-track-eval-synthetic-and-real-fixtures.md))
 
+**Track 1 — synthetic fixture, for numeric precision/recall:**
 - Pick one real, unclassified solicitation from SAM.gov; hand-extract its Section L/M once to establish extraction ground truth.
 - Author a plausible proposal deck (+ script) against it, seeding 8–10 known defects: an unaddressed requirement, a staffing number inconsistent between volumes, a slide-limit violation, a vague unsupported technical claim, etc.
 - Run the system; report **precision/recall** of findings against the seeded defects. Track over iterations.
+
+**Track 2 — the real SA5/CTG bid pair, for classification accuracy and plausibility (not a precision number):**
+- Hand-label `applies_to` / `obligation_type` / `obligation_side` on the real, hand-extracted SA5 requirements. Report **classification precision/recall** against that labeling — this is the mechanism protecting the deck-specific critique's honesty, so it's measured as its own dimension, not folded into finding precision/recall.
+- Run the system on the real SA5/CTG pair as a qualitative walkthrough: do findings look plausible and well-grounded on real content. No seeded defects exist here, so no finding-level precision/recall is computed on this track.
 - Stretch: validate against a real draft + real color-team comments from the same round, if access is cleared — the only way to answer "does it catch what real reviewers caught."
 - Supplementary grounding source: GAO bid-protest decisions (public, free) as a taxonomy of real adjudicated proposal weaknesses.
 
 ## Demo-day success criteria
 
-- A live, auto-generated traceability matrix on a real solicitation, with actual gaps found.
-- Quantified precision/recall against the labeled defect set — presented like an eval, not a vibe.
+- A live, auto-generated traceability matrix on the real SA5/CTG solicitation, honestly scoped to deck-applicable requirements, with a visible "Not coverage-scored" section for the rest.
+- Quantified precision/recall from the synthetic seeded-defect fixture (Track 1), plus classification precision/recall from the real SA5 labeling (Track 2) — presented like an eval, not a vibe.
 - Click-to-source citations that resolve to the right slide/page every time.
 - A shown instance of reviewers disagreeing, surfaced as useful signal.
 - Evidence it survives a real, messy government solicitation (amendments, cross-references), not a clean toy.

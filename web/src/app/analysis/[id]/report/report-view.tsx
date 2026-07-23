@@ -219,7 +219,7 @@ export function ReportView({
       </section>
 
       <SectionCard title="Executive summary">
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">
+        <p className="max-w-prose whitespace-pre-wrap text-sm leading-7 text-slate-700">
           {model.summaryText}
         </p>
       </SectionCard>
@@ -230,7 +230,7 @@ export function ReportView({
             {model.disagreementNotes.map((note, index) => (
               <li
                 key={index}
-                className="rounded border border-amber-300 bg-amber-50 p-3 text-sm"
+                className="rounded border border-amber-300 bg-amber-50 p-3 text-sm leading-relaxed"
               >
                 <span className="font-medium">
                   {note.reviewers.join(" vs ")}: {" "}
@@ -262,7 +262,7 @@ export function ReportView({
                   <td className="py-2 pr-4 font-mono">
                     {row.source} {row.ref}
                     {row.weight ? ` (${row.weight})` : ""}
-                    <span className="mt-1 block max-w-md font-sans text-slate-700">
+                    <span className="mt-1 block max-w-md font-sans leading-relaxed text-slate-700">
                       {row.text}
                     </span>
                     {row.supersededRefs.length > 0 && (
@@ -299,7 +299,9 @@ export function ReportView({
                           ))}
                     </div>
                   </td>
-                  <td className="py-2">{row.rationale ?? ""}</td>
+                  <td className="max-w-md py-2 leading-relaxed text-slate-700">
+                    {row.rationale ?? ""}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -347,9 +349,14 @@ export function ReportView({
                           </Chip>
                         )}
                       </div>
-                      <p className="mb-1">{finding.description}</p>
-                      <p className="mb-2 text-slate-600">
-                        Suggestion: {finding.suggestion}
+                      <p className="mb-2 max-w-prose leading-relaxed text-slate-800">
+                        {finding.description}
+                      </p>
+                      <p className="mb-2 max-w-prose leading-relaxed text-slate-600">
+                        <span className="font-medium text-slate-700">
+                          Suggestion:{" "}
+                        </span>
+                        {finding.suggestion}
                       </p>
                       <div className="flex flex-wrap gap-1">
                         <CitationButton
@@ -397,8 +404,10 @@ export function ReportView({
                       <div className="font-mono">
                         {record.source} {record.ref}
                       </div>
-                      <p className="mt-1 text-slate-700">{record.text}</p>
-                      <p className="mt-1 text-slate-600">
+                      <p className="mt-1 max-w-prose leading-relaxed text-slate-700">
+                        {record.text}
+                      </p>
+                      <p className="mt-1 max-w-prose leading-relaxed text-slate-600">
                         {record.classificationRationale ??
                           "Re-run analysis to classify this record."}
                       </p>

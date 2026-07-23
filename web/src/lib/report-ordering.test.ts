@@ -37,7 +37,8 @@ describe("sortFindings", () => {
     id: string,
     severity: "high" | "medium" | "low",
     weight: string | null,
-  ) => ({ id, severity, weight });
+    confidence: "high" | "medium" | "low" = "medium",
+  ) => ({ id, severity, weight, confidence });
 
   it("orders parseable weights highest-first, before unweighted findings", () => {
     const ordered = sortFindings([
@@ -63,6 +64,23 @@ describe("sortFindings", () => {
       make("x", "high", null),
     ]).map((f) => f.id);
     expect(ordered).toEqual(["x", "z", "y"]);
+  });
+
+  it("breaks equal-severity ties by confidence rank, high first", () => {
+    const ordered = sortFindings([
+      make("a", "low", null, "low"),
+      make("b", "low", null, "high"),
+      make("c", "low", null, "medium"),
+    ]).map((f) => f.id);
+    expect(ordered).toEqual(["b", "c", "a"]);
+  });
+
+  it("prefers severity over confidence", () => {
+    const ordered = sortFindings([
+      make("a", "low", null, "high"),
+      make("b", "high", null, "low"),
+    ]).map((f) => f.id);
+    expect(ordered).toEqual(["b", "a"]);
   });
 
   it("does not mutate the input array", () => {

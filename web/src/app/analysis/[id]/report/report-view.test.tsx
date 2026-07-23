@@ -144,6 +144,11 @@ describe("ReportView", () => {
     // The vision-only provenance badge is present.
     expect(html.toLowerCase()).toContain("vision");
     expect(html.match(/Related finding group 1/g)).toHaveLength(2);
+    // Findings explain confidence and color-code its chip (indigo, distinct
+    // from the severity scale).
+    expect(html).toContain("Confidence is how sure the reviewer is");
+    expect(html).toContain("confidence: high");
+    expect(html).toContain("text-indigo-800");
   });
 
   it("renders markdown in the executive summary (bold + numbered list)", () => {

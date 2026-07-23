@@ -23,6 +23,14 @@ const COVERAGE_CLASS: Record<string, string> = {
   missing: "bg-red-100 text-red-800",
 };
 
+// Confidence uses its own cool hue (indigo) so it never reads as a second
+// severity signal — severity is the warm red/amber/slate scale above.
+const CONFIDENCE_CLASS: Record<ReportFinding["confidence"], string> = {
+  high: "bg-indigo-100 text-indigo-800",
+  medium: "bg-indigo-50 text-indigo-700",
+  low: "bg-slate-100 text-slate-600",
+};
+
 const REVIEWER_LABEL: Record<ReviewerGroup["reviewer"], string> = {
   compliance: "Compliance",
   technical: "Technical",
@@ -410,6 +418,16 @@ export function ReportView({
       </SectionCard>
 
       <SectionCard title="Findings">
+        <p className="mb-4 max-w-prose text-xs leading-relaxed text-slate-500">
+          Ordered by{" "}
+          <span className="font-medium text-slate-700">severity</span> (how
+          material the issue is to compliance or evaluation), then by{" "}
+          <span className="font-medium text-slate-700">confidence</span> as the
+          tiebreaker. Confidence is how sure the reviewer is that the finding is
+          real and correctly assessed given the cited evidence — treat a
+          low-confidence finding as worth a human check rather than an
+          established defect.
+        </p>
         <div className="space-y-6">
           {model.reviewerGroups.map((group) => (
             <div key={group.reviewer}>
@@ -433,9 +451,9 @@ export function ReportView({
                     >
                       <div className="mb-1 flex flex-wrap items-center gap-2">
                         <Chip className={SEVERITY_CLASS[finding.severity]}>
-                          {finding.severity}
+                          severity: {finding.severity}
                         </Chip>
-                        <Chip className="bg-slate-100 text-slate-700">
+                        <Chip className={CONFIDENCE_CLASS[finding.confidence]}>
                           confidence: {finding.confidence}
                         </Chip>
                         {finding.evidenceProvenance === "vision_summary" && (

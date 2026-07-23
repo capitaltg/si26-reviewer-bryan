@@ -4,15 +4,23 @@
 //   1. parseable Section-M weight, numeric value highest first;
 //   2. findings with no / unparseable weight, after all weighted findings;
 //   3. severity rank high > medium > low;
-//   4. finding UUID ascending lexical (final tiebreaker).
+//   4. confidence rank high > medium > low (tiebreaker within equal severity);
+//   5. finding UUID ascending lexical (final tiebreaker).
 
 export type OrderableFinding = {
   id: string;
   severity: "high" | "medium" | "low";
+  confidence: "high" | "medium" | "low";
   weight: string | null;
 };
 
 const SEVERITY_RANK: Record<OrderableFinding["severity"], number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
+
+const CONFIDENCE_RANK: Record<OrderableFinding["confidence"], number> = {
   high: 0,
   medium: 1,
   low: 2,
@@ -41,6 +49,9 @@ export function compareFindings(a: OrderableFinding, b: OrderableFinding): numbe
 
   const severity = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
   if (severity !== 0) return severity;
+
+  const confidence = CONFIDENCE_RANK[a.confidence] - CONFIDENCE_RANK[b.confidence];
+  if (confidence !== 0) return confidence;
 
   if (a.id < b.id) return -1;
   if (a.id > b.id) return 1;
